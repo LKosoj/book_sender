@@ -1,0 +1,25 @@
+# Локальное окружение с Pillow/PyMuPDF (создаётся setup.py)
+.venv/
+
+# XTC-конвертер (клонируется setup.py --xtc)
+vendor/
+
+# Локальные настройки приложения
+book_sender_settings.json
+
+# Python
+__pycache__/
+*.pyc
+
+# Временные файлы конвертации
+*.opt.tmp
+
+# Системный мусор ОС
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Логи и IDE
+*.log
+.idea/
+.vscode/
