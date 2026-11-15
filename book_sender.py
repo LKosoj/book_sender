@@ -169,6 +169,15 @@ def _7z_paths() -> list:
     return ["/usr/bin/7z", "/usr/local/bin/7z"]
 
 
+def _djvu_paths(name: str) -> list:
+    if sys.platform == "darwin":
+        return [f"/opt/homebrew/bin/{name}", f"/usr/local/bin/{name}"]
+    if sys.platform == "win32":
+        pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+        return [str(Path(pf) / "DjVuLibre" / f"{name}.exe")]
+    return [f"/usr/bin/{name}"]
+
+
 def detect_tools() -> dict:
     return {
         "pandoc": find_tool("pandoc"),
@@ -179,6 +188,8 @@ def detect_tools() -> dict:
         "pillow": importlib.util.find_spec("PIL") is not None,
         "pymupdf": importlib.util.find_spec("pymupdf") is not None,
         "node": find_tool("node"),
+        "ddjvu": find_tool("ddjvu", _djvu_paths("ddjvu")),
+        "djvused": find_tool("djvused", _djvu_paths("djvused")),
         "xtc": str(VENDOR_CLI / "index.js")
         if (VENDOR_CLI / "index.js").is_file()
         and (VENDOR_CLI / "node_modules").is_dir() else None,
@@ -941,6 +952,42 @@ def pdf_meta(path: Path) -> dict:
         return {}
 
 
+def _page_to_frame(img, fmt: str) -> bytes:
+    """Страница (PIL, оттенки серого) -> кадр RGBA под экран 480×800:
+    обрезка белых полей, вписывание, дизеринг (XTC) или 4 уровня (XTCH)."""
+    from PIL import Image
+    W, H = 480, 800
+    bbox = img.point(lambda g: 0 if g > 240 else 255).getbbox()
+    if bbox:
+        pad = 8
+        img = img.crop((max(0, bbox[0] - pad), max(0, bbox[1] - pad),
+                        min(img.width, bbox[2] + pad),
+                        min(img.height, bbox[3] + pad)))
+    fit = min(W / img.width, H / img.height, 2.0)
+    if abs(fit - 1.0) > 0.01:
+        resample = getattr(Image, "Resampling", Image).LANCZOS
+        img = img.resize((max(1, round(img.width * fit)),
+                          max(1, round(img.height * fit))), resample)
+    if fmt == "xtch":
+        img = img.point(lambda g: 255 if g > 212 else
+                        170 if g > 127 else 85 if g > 42 else 0)
+    else:
+        img = img.convert("1", dither=Image.FLOYDSTEINBERG).convert("L")
+    canvas = Image.new("L", (W, H), 255)
+    canvas.paste(img, ((W - img.width) // 2, (H - img.height) // 2))
+    return canvas.convert("RGBA").tobytes()
+
+
+def _pack_frames(frames: Path, n: int, fmt: str, title: str, author: str,
+                 out: Path, tools: dict, stop=None):
+    """Кадры RGBA -> контейнер XTC/XTCH вендоренным Node-энкодером."""
+    bridge = Path(__file__).resolve().with_name("pdf_frames_to_xtc.js")
+    run_cmd([tools["node"], str(bridge), str(frames), str(n), "480", "800",
+             fmt, title, author, str(out)], timeout=1800, stop=stop)
+    if not out.is_file() or out.stat().st_size == 0:
+        raise ToolError(t("err.encoder_no_xtc"))
+
+
 def pdf_to_xtc(pdf: Path, out: Path, fmt: str, tools: dict, log, stop=None) -> Path:
     """PDF -> XTC/XTCH: постраничный рендер (PyMuPDF) -> оттенки серого/дизеринг
     (Pillow) -> упаковка вендоренным Node-энкодером. Без Calibre."""
@@ -950,7 +997,6 @@ def pdf_to_xtc(pdf: Path, out: Path, fmt: str, tools: dict, log, stop=None) -> P
         raise ToolError(t("err.xtc_not_installed"))
     import pymupdf
     from PIL import Image
-    W, H = 480, 800
     frames = out.with_name(out.name + ".frames")
     try:
         try:
@@ -965,43 +1011,56 @@ def pdf_to_xtc(pdf: Path, out: Path, fmt: str, tools: dict, log, stop=None) -> P
                 for page in doc:
                     if stop is not None and stop.is_set():
                         raise Cancelled()
-                    scale = min(W / page.rect.width, H / page.rect.height)
+                    scale = min(480 / page.rect.width, 800 / page.rect.height)
                     pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale),
                                           colorspace=pymupdf.csGRAY, alpha=False)
                     img = Image.frombytes("L", (pix.width, pix.height), pix.samples)
-                    # обрезаем белые поля страницы (скан полезнее крупнее)
-                    bbox = img.point(lambda g: 0 if g > 240 else 255).getbbox()
-                    if bbox:
-                        pad = 8
-                        img = img.crop((max(0, bbox[0] - pad),
-                                        max(0, bbox[1] - pad),
-                                        min(img.width, bbox[2] + pad),
-                                        min(img.height, bbox[3] + pad)))
-                    # обрезанное вписываем в экран, не увеличивая свыше 2x
-                    fit = min(W / img.width, H / img.height, 2.0)
-                    if abs(fit - 1.0) > 0.01:
-                        resample = getattr(Image, "Resampling", Image).LANCZOS
-                        img = img.resize((max(1, round(img.width * fit)),
-                                          max(1, round(img.height * fit))), resample)
-                    if fmt == "xtch":
-                        img = img.point(lambda g: 255 if g > 212 else
-                                        170 if g > 127 else 85 if g > 42 else 0)
-                    else:
-                        img = img.convert("1", dither=Image.FLOYDSTEINBERG).convert("L")
-                    canvas = Image.new("L", (W, H), 255)
-                    canvas.paste(img, ((W - img.width) // 2, (H - img.height) // 2))
-                    f.write(canvas.convert("RGBA").tobytes())
+                    f.write(_page_to_frame(img, fmt))
                     n += 1
-        bridge = Path(__file__).resolve().with_name("pdf_frames_to_xtc.js")
         meta = pdf_meta(pdf)
-        title = meta.get("title") or pdf.stem
-        author = meta.get("author") or ""
-        run_cmd([tools["node"], str(bridge), str(frames), str(n), str(W), str(H),
-                 fmt, title, author, str(out)], timeout=1800, stop=stop)
+        _pack_frames(frames, n, fmt, meta.get("title") or pdf.stem,
+                     meta.get("author") or "", out, tools, stop)
     finally:
         frames.unlink(missing_ok=True)
-    if not out.is_file() or out.stat().st_size == 0:
-        raise ToolError(t("err.encoder_no_xtc"))
+    return out
+
+
+def djvu_to_xtc(djvu: Path, out: Path, fmt: str, tools: dict, log, stop=None) -> Path:
+    """DjVu -> XTC/XTCH: страницы рендерим ddjvu (DjVuLibre) и упаковываем
+    тем же конвейером, что и PDF-сканы. Текстовый слой DjVu игнорируется —
+    это всегда постраничные картинки."""
+    if not tools.get("ddjvu"):
+        raise ToolError(t("err.ddjvu_needed"))
+    if not tools.get("node") or not tools.get("xtc"):
+        raise ToolError(t("err.xtc_not_installed"))
+    import io as _io
+    from PIL import Image
+    try:
+        outp, _ = run_cmd([tools["djvused"], str(djvu), "-e", "n"],
+                           timeout=120, stop=stop)
+        pages = int(outp.decode().strip().split()[-1])
+    except Cancelled:
+        raise
+    except Exception as e:
+        raise ToolError(t("err.djvu_open", error=e)) from e
+    if pages <= 0:
+        raise ToolError(t("err.djvu_no_pages"))
+    frames = out.with_name(out.name + ".frames")
+    try:
+        n = 0
+        with open(frames, "wb") as f:
+            for i in range(1, pages + 1):
+                if stop is not None and stop.is_set():
+                    raise Cancelled()
+                ppm, _ = run_cmd([tools["ddjvu"], "-format=ppm", f"-page={i}",
+                                  "-size=960x1600", str(djvu)],
+                                 timeout=300, stop=stop)
+                img = Image.open(_io.BytesIO(ppm)).convert("L")
+                f.write(_page_to_frame(img, fmt))
+                n += 1
+        _pack_frames(frames, n, fmt, djvu.stem, "", out, tools, stop)
+    finally:
+        frames.unlink(missing_ok=True)
     return out
 
 
@@ -1421,21 +1480,23 @@ def describe_file(p: Path) -> str:
 def convert_all(files, stage: Path, tools, log, stop=None, on_file=None,
                 on_progress=None, formats=None):
     """Фаза 1: конвертация всех файлов в stage, НЕ дожидаясь устройства.
-    Возвращает (tasks, skipped, errors, pdf_tasks); tasks = список
-    (idx_файла, путь_epub); pdf_tasks = [(idx, путь_pdf)] — PDF под XTC."""
+    Возвращает (tasks, skipped, errors, page_tasks); tasks = список
+    (idx_файла, путь_epub); page_tasks = [(idx, путь)] — PDF и DjVu,
+    которые обрабатываются постранично (в EPUB с перенабором или в XTC)."""
     tasks = []
-    pdf_tasks = []
+    page_tasks = []
     skipped = errors = 0
     total = len(files)
     for idx, src in enumerate(files):
         if stop is not None and stop.is_set():
             raise Cancelled()
-        fmt = formats[idx] if formats and idx < len(formats) else "epub"
-        if src.suffix.lower() == ".pdf":
-            # PDF: есть текст -> EPUB (перенабор), нет (скан) -> XTC страницами
-            pdf_tasks.append((idx, src))
+        if src.suffix.lower() in (".pdf", ".djvu"):
+            # PDF: есть текст -> EPUB (перенабор), нет (скан) -> XTC страницами.
+            # DjVu: всегда постранично (это картинки страниц).
+            page_tasks.append((idx, src))
             if on_file:
-                on_file(idx, "PDF → EPUB/XTC", "work")
+                on_file(idx, t("status.route_pdf" if src.suffix.lower() == ".pdf"
+                               else "status.route_djvu"), "work")
             if on_progress:
                 on_progress(idx + 1, total)
             continue
@@ -1468,7 +1529,7 @@ def convert_all(files, stage: Path, tools, log, stop=None, on_file=None,
                 on_file(idx, str(e)[:80], "err")
         if on_progress:
             on_progress(idx + 1, total)
-    return tasks, skipped, errors, pdf_tasks
+    return tasks, skipped, errors, page_tasks
 
 
 def wait_for_device(host, log, stop=None, interval=5, timeout=0, on_attempt=None):
@@ -1525,7 +1586,7 @@ def run_batch(files, host, dest, replace_existing, tools, log, stop=None,
     stage = Path(tempfile.mkdtemp(prefix="booksender_stage_"))
     try:
         # Фаза 1: конвертируем всё сразу, устройство пока не нужно
-        tasks, skipped, errors, pdf_tasks = convert_all(
+        tasks, skipped, errors, page_tasks = convert_all(
             files, stage, tools, log, stop, on_file, on_progress, formats)
         if not tasks and not pdf_tasks:
             log(t("log.summary_zero", skipped=skipped, errors=errors))
@@ -1597,22 +1658,46 @@ def run_batch(files, host, dest, replace_existing, tools, log, stop=None,
             prepared.append((idx, epub, author))
         tasks = prepared
 
+        # Постраничные файлы: PDF и DjVu.
         # PDF: если есть текст — EPUB с картинками (перенабор под экран);
         # если текста нет (скан) — рендер страниц в XTC.
-        for idx, pdf in pdf_tasks:
+        for idx, pdf in page_tasks:
             if stop is not None and stop.is_set():
                 raise Cancelled()
             if on_file:
                 on_file(idx, t("status.pdf_analyze"), "work")
             chosen = formats[idx] if formats and idx < len(formats) else "epub"
-            meta = pdf_meta(pdf)
-            title = meta.get("title") or pdf.stem
-            author_raw = meta.get("author") or ""
+            is_djvu = pdf.suffix.lower() == ".djvu"
+            if is_djvu:
+                title, author_raw = pdf.stem, ""
+            else:
+                meta = pdf_meta(pdf)
+                title = meta.get("title") or pdf.stem
+                author_raw = meta.get("author") or ""
             author = author_folder_name(author_raw)
             stem = sanitize_filename(
                 ((author_raw + " - ") if author_raw else "") + title)
             work = stage / f"p{idx}"
             work.mkdir(parents=True, exist_ok=True)
+            if is_djvu:
+                # DjVu — всегда постраничные картинки -> XTC
+                fmt_out = chosen if chosen in ("xtc", "xtch") else "xtc"
+                out = work / (stem + "." + fmt_out)
+                try:
+                    djvu_to_xtc(pdf, out, fmt_out, tools, log, stop)
+                    log(t("log.pdf_pages", name=pdf.name, out=out.name,
+                          kb=out.stat().st_size // 1024))
+                    prepared.append((idx, out, author))
+                    if on_file:
+                        on_file(idx, t("status.ready_fmt", fmt=fmt_out.upper()), "ready")
+                except Cancelled:
+                    raise
+                except ToolError as e:
+                    errors += 1
+                    log(f"  ✗ {pdf.name}: {e}")
+                    if on_file:
+                        on_file(idx, str(e)[:80], "err")
+                continue
             if chosen in ("xtc", "xtch"):
                 # Пользователь явно выбрал XTC/XTCH: страницы как есть —
                 # путь для PDF со сложной вёрсткой (колонки, таблицы)

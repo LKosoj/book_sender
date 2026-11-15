@@ -236,7 +236,7 @@ def make_fixtures(d: Path, tools):
 
     if not tools.get("calibre"):
         pass  # PDF теперь обрабатывается без Calibre: текст->EPUB, скан->XTC
-    (d / "unsupported.djvu").write_bytes(b"fake djvu")
+    (d / "unsupported.cbr").write_bytes(b"fake comic book archive")
     (d / "native.xtc").write_bytes(b"XTC fake pre-rendered book")
 
     # текстовый PDF -> EPUB (перенабор); PDF без текста (скан) -> XTC страницами
@@ -390,6 +390,23 @@ def make_fixtures(d: Path, tools):
                        cwd=str(d), check=True, capture_output=True)
     except ImportError:
         pass
+    # DjVu (нужен DjVuLibre: c44/djvm) — должен уйти в XTC страницами
+    try:
+        import shutil as _sh
+        from PIL import Image as _PILImage, ImageDraw as _PILDraw
+        if _sh.which("c44") and _sh.which("djvm") and tools.get("ddjvu"):
+            for i in (1, 2):
+                im = _PILImage.new("L", (480, 800), 255)
+                _PILDraw.Draw(im).rectangle([40, 40 + i * 10, 440, 700], outline=100)
+                im.save(d / f"p{i}.ppm")
+                subprocess.run(["c44", f"p{i}.ppm", f"p{i}.djvu"], cwd=str(d),
+                               check=True, capture_output=True)
+            subprocess.run(["djvm", "-c", "scanbook.djvu", "p1.djvu", "p2.djvu"],
+                           cwd=str(d), check=True, capture_output=True)
+            for f in ("p1.ppm", "p2.ppm", "p1.djvu", "p2.djvu"):
+                (d / f).unlink(missing_ok=True)
+    except Exception:
+        pass
     return d
 
 
@@ -468,6 +485,8 @@ def main():
             expected.add(f"{AF}/Иван Тестов - Тестовый PDF.epub")
             expected.add("scan.xtc")
             expected.add(f"{AF}/Иван Тестов - Две колонки.xtc")
+        if tools.get("ddjvu") and (fixtures / "scanbook.djvu").exists():
+            expected.add("scanbook.xtc")
         if tools.get("7z"):
             expected.add(f"{AF}/Тестов Иван - Семь зип.epub")
         missing = expected - names
@@ -545,6 +564,10 @@ def main():
                 "двухколоночный PDF должен автоматически уйти в XTC"
             print(f"PDF: текст -> EPUB ({len(imgs)} карт. встроено), "
                   "скан и колонки -> XTC автоматически — ОК")
+        if tools.get("ddjvu") and (fixtures / "scanbook.djvu").exists():
+            assert (books / "scanbook.xtc").read_bytes()[:4] == b"XTC\x00", \
+                "DjVu должен уйти в XTC страницами"
+            print("DjVu -> XTC страницами — ОК")
 
         # 3) повторный прогон — всё пропущено
         logs2 = []

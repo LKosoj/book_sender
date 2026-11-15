@@ -84,7 +84,8 @@ python book_sender.py --cli --folder ~/books --lang en   # язык сообще
 | `.docx`, `.odt`, `.rtf`, `.html`, `.md`, `.txt` | → EPUB (картинки из документа переносятся) |
 | `.pdf` | **автоматически:** с текстом → EPUB с картинками; сканы и сложная вёрстка (колонки, таблицы, слайды) → XTC страницами |
 | `.mobi`, `.azw3` | через Calibre, если установлен; иначе пропускается |
-| прочее (`.djvu`, `.cbr`, …) | пропускается с сообщением |
+| `.djvu` | → XTC страницами (рендер ddjvu; нужен [DjVuLibre](https://djvu.sourceforge.net): macOS `brew install djvulibre`, Linux `sudo apt install djvulibre-bin`, Windows — установщик DjVuLibre) |
+| прочее (`.cbr`, …) | пропускается с сообщением |
 
 ## Что делает с книгами
 

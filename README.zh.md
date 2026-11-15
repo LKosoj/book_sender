@@ -81,7 +81,8 @@ python book_sender.py --cli --folder ~/books --lang en   # 消息语言
 | `.docx`、`.odt`、`.rtf`、`.html`、`.md`、`.txt` | → EPUB（文档中的图片会一并保留） |
 | `.pdf` | **自动处理：** 有文本 → 带图片的 EPUB；扫描版和复杂版式（分栏、表格、幻灯片）→ 按页渲染为 XTC |
 | `.mobi`、`.azw3` | 通过 Calibre 转换（如已安装）；否则跳过 |
-| 其他（`.djvu`、`.cbr` 等） | 跳过并提示 |
+| `.djvu` | → XTC 页面图片（ddjvu 渲染；需要 [DjVuLibre](https://djvu.sourceforge.net)：macOS `brew install djvulibre`，Linux `sudo apt install djvulibre-bin`，Windows — DjVuLibre 安装程序） |
+| 其他（`.cbr` 等） | 跳过并提示 |
 
 ## 对图书做的处理
 

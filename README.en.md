@@ -84,7 +84,8 @@ forever; interrupt with Ctrl+C.
 | `.docx`, `.odt`, `.rtf`, `.html`, `.md`, `.txt` | → EPUB (images from the document are carried over) |
 | `.pdf` | **automatic:** with text → EPUB with images; scans and complex layout (columns, tables, slides) → XTC page by page |
 | `.mobi`, `.azw3` | via Calibre if installed; otherwise skipped |
-| other (`.djvu`, `.cbr`, …) | skipped with a message |
+| `.djvu` | → XTC page images (ddjvu rendering; needs [DjVuLibre](https://djvu.sourceforge.net): macOS `brew install djvulibre`, Linux `sudo apt install djvulibre-bin`, Windows — DjVuLibre installer) |
+| other (`.cbr`, …) | skipped with a message |
 
 ## What it does with the books
 
