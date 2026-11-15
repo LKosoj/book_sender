@@ -75,6 +75,7 @@ python book_sender.py --cli --folder ~/books --replace   # with auto-search, ove
 python book_sender.py --cli --folder ~/books --wait-timeout 300  # wait up to 5 min
 python book_sender.py --cli --folder ~/books --flat   # no author folders
 python book_sender.py --cli --folder ~/books --lang en   # message language
+python book_sender.py --cli --folder ~/books --ascii-symbols   # arrows -> ASCII
 ```
 
 Without `--wait-timeout` (or with `0`) the CLI waits for the device to appear
@@ -109,7 +110,11 @@ forever; interrupt with Ctrl+C.
   - images → **grayscale**, fitted to the **800×480** screen, recompressed;
   - **structure repair**: `mimetype` and `META-INF/container.xml` are restored
     if missing or broken;
-  - **structure validation**: broken EPUBs are not sent.
+  - **structure validation**: broken EPUBs are not sent;
+  - optionally — **rare-symbol substitution**: arrows and check marks missing
+    from reader fonts (`→` `⇒` `✓`) are replaced with ASCII (`->` `=>` `v`) —
+    the "Replace rare symbols" checkbox or `--ascii-symbols`. Alternatively,
+    install a font with these symbols on the reader (e.g. DejaVu Serif).
 - FB2 files in cp1251 encoding are automatically re-encoded to UTF-8.
 
 ## Instant opening: XTC and XTCH

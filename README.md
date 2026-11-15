@@ -75,6 +75,7 @@ python book_sender.py --cli --folder ~/books --replace   # с автопоиск
 python book_sender.py --cli --folder ~/books --wait-timeout 300  # ждать макс. 5 мин
 python book_sender.py --cli --folder ~/books --flat   # без папок авторов
 python book_sender.py --cli --folder ~/books --lang en   # язык сообщений
+python book_sender.py --cli --folder ~/books --ascii-symbols   # стрелки -> ASCII
 ```
 
 Без `--wait-timeout` (или с `0`) CLI ждёт появления устройства бесконечно;
@@ -109,7 +110,11 @@ python book_sender.py --cli --folder ~/books --lang en   # язык сообще
   - картинки → **оттенки серого**, вписывание в экран **800×480**, пережатие;
   - **ремонт структуры**: восстанавливаются `mimetype` и `META-INF/container.xml`,
     если отсутствуют или повреждены;
-  - **проверка структуры**: битые EPUB не отправляются.
+  - **проверка структуры**: битые EPUB не отправляются;
+  - опционально — **замена редких символов**: стрелки и галочки, которых нет
+    в шрифтах читалки (`→` `⇒` `✓`), заменяются на ASCII (`->` `=>` `v`) —
+    галочка «Заменять редкие символы» или `--ascii-symbols`. Альтернатива —
+    положить на читалку шрифт с этими символами (например, DejaVu Serif).
 - FB2 в кодировке cp1251 автоматически перекодируются в UTF-8.
 
 ## Мгновенное открытие: XTC и XTCH

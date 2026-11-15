@@ -639,6 +639,54 @@ def strip_xml_comments(t: str):
     return "".join(out), count
 
 
+# Символы, которых обычно нет в шрифтах читалок -> безопасные ASCII-аналоги
+SYMBOL_MAP = {
+    "→": "->", "←": "<-", "↔": "<->", "↦": "->", "↣": "->",
+    "⇒": "=>", "⇐": "<=", "⇔": "<=>",
+    "➜": "->", "➔": "->", "➤": "->", "►": "->",
+    "✓": "v", "✔": "v", "☑": "v",
+    "✗": "x", "✘": "x", "☒": "x",
+}
+
+
+def ascii_symbols_epub(path: Path) -> int:
+    """Заменяет в XHTML/HTML содержимом EPUB символы, которых обычно нет
+    в шрифтах читалок (стрелки, галочки), на ASCII-аналоги.
+    Возвращает число замен (0 — если менять нечего)."""
+    replaced = 0
+    data = {}
+    with zipfile.ZipFile(path) as z:
+        for item in z.infolist():
+            data[item.filename] = z.read(item.filename)
+    for name, blob in list(data.items()):
+        if not name.lower().endswith((".xhtml", ".html", ".htm")):
+            continue
+        text = None
+        for enc in ("utf-8", "cp1252"):
+            try:
+                text = blob.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        if text is None:
+            continue
+        new = "".join(SYMBOL_MAP.get(ch, ch) for ch in text)
+        if new != text:
+            replaced += sum(text.count(sym) for sym in SYMBOL_MAP)
+            data[name] = new.encode("utf-8")
+    if replaced:
+        tmp = path.with_name(path.name + ".sym.tmp")
+        with zipfile.ZipFile(tmp, "w") as z:
+            if "mimetype" in data:  # по спецификации EPUB — первым, без сжатия
+                z.writestr(zipfile.ZipInfo("mimetype"), data["mimetype"],
+                           compress_type=zipfile.ZIP_STORED)
+            for n, b in data.items():
+                if n != "mimetype":
+                    z.writestr(n, b, compress_type=zipfile.ZIP_DEFLATED)
+        tmp.replace(path)
+    return replaced
+
+
 def optimize_epub(path: Path, optimize_images: bool = False) -> dict:
     """Оптимизирует EPUB на месте. Возвращает статистику; при любой ошибке
     оставляет исходный файл нетронутым."""
@@ -1599,7 +1647,7 @@ def wait_for_device(host, log, stop=None, interval=5, timeout=0, on_attempt=None
 def run_batch(files, host, dest, replace_existing, tools, log, stop=None,
               on_file=None, on_progress=None, wait_timeout=0,
               on_device=None, on_waiting=None, by_author=True, optimize=True,
-              formats=None, xtc_font_pt=None):
+              formats=None, xtc_font_pt=None, ascii_symbols=False):
     """Конвертация сразу -> оптимизация -> XTC по выбору -> ожидание -> отправка.
     on_file(index, status_text, tag) — для GUI; wait_timeout=0 — ждать вечно.
     by_author: раскладывать по папкам авторов (как плагин organize-by-author).
@@ -1649,6 +1697,13 @@ def run_batch(files, host, dest, replace_existing, tools, log, stop=None,
                                   images=s['images'], repairs=s['repairs']))
                     except Exception as e:
                         log(t("log.optimize_skipped", name=epub.name, error=e))
+                if ascii_symbols:
+                    try:
+                        n_sym = ascii_symbols_epub(epub)
+                        if n_sym:
+                            log(t("log.ascii_symbols", n=n_sym, name=epub.name))
+                    except Exception as e:
+                        log(f"  ⚠ {epub.name}: {e}")
                 author = author_folder_name(epub_author(epub))
                 v = validate_epub(epub)
                 if v["problems"]:
@@ -1771,6 +1826,11 @@ def run_batch(files, host, dest, replace_existing, tools, log, stop=None,
                                   optimize_images=bool(tools.get("pillow")))
                 except Exception as e:
                     log(t("log.optimize_skipped", name=epub_out.name, error=e))
+            if ascii_symbols:
+                try:
+                    ascii_symbols_epub(epub_out)
+                except Exception:
+                    pass
             log(t("log.pdf_reflow", name=pdf.name, out=epub_out.name))
             prepared.append((idx, epub_out, author))
             if on_file:
@@ -1964,6 +2024,11 @@ def run_gui():
             ttk.Checkbutton(top, text=t("gui.optimize"),
                             variable=self.optimize_var).grid(
                 row=4, column=1, columnspan=2, sticky="w")
+            self.ascii_var = tk.BooleanVar(
+                value=self.settings.get("ascii_symbols", False))
+            ttk.Checkbutton(top, text=t("gui.ascii_symbols"),
+                            variable=self.ascii_var).grid(
+                row=6, column=1, columnspan=3, sticky="w")
             self.font_label = ttk.Label(top, text=t("gui.font_pt"))
             self.font_label.grid(row=4, column=3, sticky="e")
             old_px = self.settings.get("xtc_font_size")
@@ -2060,6 +2125,7 @@ def run_gui():
                     "recursive": self.recursive_var.get(),
                     "by_author": self.by_author_var.get(),
                     "optimize": self.optimize_var.get(),
+                    "ascii_symbols": self.ascii_var.get(),
                     "xtc_font_pt": self.xtc_font_pt_var.get(),
                     "language": self.settings.get("language", "auto"),
                 }, ensure_ascii=False, indent=2), "utf-8")
@@ -2298,6 +2364,7 @@ def run_gui():
             replace = self.mode_var.get() == t("gui.mode_replace")
             by_author = self.by_author_var.get()
             optimize = self.optimize_var.get()
+            ascii_symbols = self.ascii_var.get()
             formats = list(getattr(self, "formats", []))
             try:
                 xtc_font_pt = int(self.xtc_font_pt_var.get())
@@ -2328,7 +2395,8 @@ def run_gui():
                               on_device=lambda ip, st: self.q.put(("found", ip, st)),
                               on_waiting=lambda n: self.q.put(("waiting", n)),
                               by_author=by_author, optimize=optimize,
-                              formats=formats, xtc_font_pt=xtc_font_pt)
+                              formats=formats, xtc_font_pt=xtc_font_pt,
+                              ascii_symbols=ascii_symbols)
                     self.save_settings_quiet()
                 except Cancelled:
                     self.log(t("log.stopped_user"))
@@ -2434,6 +2502,8 @@ def main():
                     help=t("cli.flat"))
     ap.add_argument("--no-optimize", action="store_true",
                     help=t("cli.no_optimize"))
+    ap.add_argument("--ascii-symbols", action="store_true",
+                    help=t("cli.ascii_symbols"))
     ap.add_argument("--format", choices=["epub", "xtc", "xtch"], default="epub",
                     help=t("cli.format"))
     ap.add_argument("--xtc-font-pt", type=int, default=14, choices=[12, 14, 16, 18],
@@ -2490,7 +2560,8 @@ def main():
                                  by_author=not args.flat,
                                  optimize=not args.no_optimize,
                                  formats=[args.format] * len(files),
-                                 xtc_font_pt=args.xtc_font_pt)
+                                 xtc_font_pt=args.xtc_font_pt,
+                                 ascii_symbols=args.ascii_symbols)
     except KeyboardInterrupt:
         log(t("cli.interrupted"))
         return 130

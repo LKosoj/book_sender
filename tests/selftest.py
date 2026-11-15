@@ -435,6 +435,22 @@ def main():
     assert added == ["c.pdf"] and changed == ["a.fb2"] and removed == [], \
         (added, changed, removed)
     print("мониторинг папки: snapshot_diff — ОК")
+    # замена редких символов на ASCII (стрелки/галочки)
+    import zipfile as _zf
+    sym = tmp / "symbols.epub"
+    with _zf.ZipFile(sym, "w") as z:
+        z.writestr("mimetype", b"application/epub+zip")
+        z.writestr("OEBPS/ch1.xhtml",
+                   '<?xml version="1.0" encoding="UTF-8"?>\n<html><body>'
+                   '<p>Стрелка → и галочка ✓ и ⇒</p></body></html>'.encode("utf-8"))
+    n_sym = bs.ascii_symbols_epub(sym)
+    assert n_sym == 3, n_sym
+    with _zf.ZipFile(sym) as z:
+        content = z.read("OEBPS/ch1.xhtml").decode("utf-8")
+        assert "->" in content and "=>" in content and " v " in content, content
+        assert "→" not in content and "✓" not in content and "⇒" not in content
+        assert z.read("mimetype") == b"application/epub+zip"
+    print("замена символов -> ASCII — ОК")
     # i18n: каталоги, автоопределение, фолбэк
     locales = Path(bs.__file__).resolve().parent / "locales"
     langs = bs.available_languages()
