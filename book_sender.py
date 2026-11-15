@@ -1664,7 +1664,8 @@ READER_FONTS = {
 def ensure_reader_font(dev, log, lang=None) -> bool:
     """Загружает семейство шрифта для языка интерфейса в /fonts устройства,
     если его там нет (ru -> Gentium Book Plus, en -> Charis SIL,
-    zh -> Noto Serif SC в формате .cpfont). Ошибка не блокирует отправку книг."""
+    zh -> Noto Serif SC в формате .cpfont). Ничего с устройства не удаляет.
+    Ошибка не блокирует отправку книг."""
     lang = lang or current_language()
     spec = READER_FONTS.get(lang)
     if spec is None:
