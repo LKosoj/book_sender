@@ -114,8 +114,9 @@ forever; interrupt with Ctrl+C.
   - optionally — **rare-symbol substitution**: arrows and check marks missing
     from reader fonts (`→` `⇒` `✓`) are replaced with ASCII (`->` `=>` `v`) —
     the "Replace rare symbols" checkbox or `--ascii-symbols`. Alternatively,
-    the **DejaVu Serif** font: the app **uploads it to the reader automatically**
-    on connect (if missing); just select it in the reader's font settings.
+    the **Gentium Book Plus** font (with real bold and italic): the app
+    **uploads it to the reader automatically** on connect (if missing); just
+    select it in Settings > Reader > Font Family.
 - FB2 files in cp1251 encoding are automatically re-encoded to UTF-8.
 
 ## Instant opening: XTC and XTCH

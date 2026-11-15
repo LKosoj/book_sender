@@ -71,7 +71,7 @@
   "log.pdf_reflow": "  ▤ {name} → {out} (text reflow)",
   "log.prep_done": "Preparation done: {n} file(s) ready to send. Connecting to the device…",
   "log.device_info": "Device: {device} / {family} v{version} ({mode}) at {host}",
-  "log.font_uploaded": "DejaVu Serif font uploaded to the reader (/fonts) — select it in the reader's font settings to render arrows and Cyrillic",
+  "log.font_uploaded": "Gentium Book Plus font uploaded to the reader (/fonts) — select it in Settings > Reader > Font Family to render arrows, check marks and Cyrillic",
   "log.font_failed": "Could not upload the font to the reader: {error} (books will still be sent)",
   "log.folder_count": "Folder {dest}: {n} file(s) including subfolders",
   "log.already_on_device": "  = already on device: {path}",

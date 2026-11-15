@@ -1644,23 +1644,34 @@ def wait_for_device(host, log, stop=None, interval=5, timeout=0, on_attempt=None
             raise DeviceError(f"устройство не появилось за {timeout} с")
 
 
-READER_FONT_NAME = "DejaVuSerif.ttf"
+READER_FONT_FAMILY = "GentiumBookPlus"
+READER_FONT_FILES = (
+    "GentiumBookPlus-Regular.ttf",
+    "GentiumBookPlus-Bold.ttf",
+    "GentiumBookPlus-Italic.ttf",
+    "GentiumBookPlus-BoldItalic.ttf",
+)
 
 
 def ensure_reader_font(dev, log) -> bool:
-    """Загружает DejaVu Serif в /fonts устройства, если его там нет:
-    в нём есть стрелки и кириллица, которых нет во встроенных шрифтах
-    CrossPoint. Ошибка не блокирует отправку книг."""
-    local = Path(__file__).resolve().with_name("fonts") / READER_FONT_NAME
-    if not local.is_file():
+    """Загружает семейство Gentium Book Plus (regular/bold/italic/bold-italic)
+    в /fonts/<семейство> устройства, если его там нет: полная кириллица,
+    стрелки и галочки, которых нет во встроенных шрифтах CrossPoint, плюс
+    настоящие жирный и курсив для книг. Ошибка не блокирует отправку книг."""
+    local_dir = Path(__file__).resolve().with_name("fonts") / READER_FONT_FAMILY
+    if not (local_dir / READER_FONT_FILES[0]).is_file():
         return False
+    remote_dir = "/fonts/" + READER_FONT_FAMILY
     try:
-        entries = dev.list_dir("/fonts") or []
-        if any(e.get("name", "").casefold() == READER_FONT_NAME.casefold()
-               for e in entries):
+        entries = dev.list_dir(remote_dir) or []
+        names = {e.get("name", "").casefold() for e in entries}
+        if READER_FONT_FILES[0].casefold() in names:
             return True
-        dev.ensure_dir("/fonts")
-        dev.upload(local, "/fonts", True)
+        dev.ensure_dir(remote_dir)
+        for fn in READER_FONT_FILES:
+            f = local_dir / fn
+            if f.is_file():
+                dev.upload(f, remote_dir, True)
         log(t("log.font_uploaded"))
         return True
     except Exception as e:
