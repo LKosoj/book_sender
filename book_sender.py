@@ -1475,6 +1475,14 @@ def scan_folder(folder: Path, recursive=True) -> list:
     return files
 
 
+def snapshot_diff(snapshot: dict, current: dict):
+    """Сравнение снимков папки: (added, changed, removed) — списки ключей."""
+    added = [k for k in current if k not in snapshot]
+    changed = [k for k in snapshot if k in current and snapshot[k] != current[k]]
+    removed = [k for k in snapshot if k not in current]
+    return added, changed, removed
+
+
 def describe_file(p: Path) -> str:
     ext = p.suffix.lower()
     if ext in ARCHIVE_EXTS:
@@ -1878,6 +1886,9 @@ def run_gui():
             self.formats = []
             self.iids = []
             self.batch_iids = []
+            self.busy = False
+            self.snapshot = {}
+            self.meta = {}
             self.settings = self.load_settings()
             set_language(self.settings.get("language", "auto"))
             root.title(t("app.title", app=APP_NAME))
@@ -1901,6 +1912,9 @@ def run_gui():
             self.log(t("log.hint_transfer"))
             self.log(t("log.hint_format"))
             self.update_font_visibility()
+            if self.folder_var.get() and Path(self.folder_var.get()).expanduser().is_dir():
+                self.scan_files()
+            root.after(5000, self.poll_folder)
 
         # ---- ui
         def build_ui(self):
@@ -2086,6 +2100,7 @@ def run_gui():
             self.update_font_visibility()
 
         def set_busy(self, busy):
+            self.busy = busy
             state = "disabled" if busy else "normal"
             for b in (self.scan_btn, self.start_btn, self.find_btn):
                 b.configure(state=state)
@@ -2123,18 +2138,97 @@ def run_gui():
             if not folder.is_dir():
                 messagebox.showwarning(APP_NAME, t("dlg.choose_folder"))
                 return
-            self.files = scan_folder(folder, self.recursive_var.get())
-            self.formats = ["epub"] * len(self.files)
+            paths = scan_folder(folder, self.recursive_var.get())
+            # базовый снимок: ничего не помечаем как новое
+            self.snapshot = {}
+            self.meta = {}
+            self.files = []
+            self.formats = []
             self.tree.delete(*self.tree.get_children())
             self.iids = []
             labels = format_labels()
-            for p in self.files:
+            for p in paths:
+                key = str(p)
+                try:
+                    st = p.stat()
+                    self.snapshot[key] = (st.st_mtime, st.st_size)
+                except OSError:
+                    pass
+                self.meta[key] = {"fresh": False, "status": "—", "tag": "",
+                                  "fmt": "epub"}
+                self.files.append(p)
+                self.formats.append("epub")
                 iid = self.tree.insert("", "end", values=(
                     str(p.relative_to(folder)), describe_file(p),
                     labels["epub"], "—"))
                 self.iids.append(iid)
+            self.batch_iids = []
             self.progress.configure(maximum=max(1, len(self.files)), value=0)
             self.log(t("log.found_files", count=len(self.files), folder=folder))
+            self.update_font_visibility()
+
+        def poll_folder(self):
+            try:
+                if not self.busy:
+                    self._watch_folder()
+            finally:
+                self.root.after(5000, self.poll_folder)
+
+        def _watch_folder(self):
+            """Мониторинг папки: новые и изменённые файлы наверху списка."""
+            folder = Path(self.folder_var.get()).expanduser()
+            if not folder.is_dir():
+                return
+            current = {}
+            for p in scan_folder(folder, self.recursive_var.get()):
+                try:
+                    st = p.stat()
+                except OSError:
+                    continue
+                current[str(p)] = (st.st_mtime, st.st_size)
+            added, changed, removed = snapshot_diff(self.snapshot, current)
+            if not (added or changed or removed):
+                return
+            for k in added:
+                self.meta[k] = {"fresh": True, "status": t("status.new"),
+                                "tag": "work", "fmt": "epub"}
+            for k in changed:
+                m = self.meta.get(k) or {"fmt": "epub"}
+                m.update({"fresh": True, "status": t("status.changed"),
+                          "tag": "work"})
+                self.meta[k] = m
+            for k in removed:
+                self.meta.pop(k, None)
+            self.snapshot = current
+            self._rebuild_tree(folder)
+            self.log(t("log.watch_changed", n=len(added) + len(changed)))
+
+        def _rebuild_tree(self, folder):
+            """Перестраивает список: новые/изменённые сверху (по времени),
+            остальные — по алфавиту; статусы и форматы сохраняются."""
+            labels = format_labels()
+            fresh = [k for k, m in self.meta.items() if m["fresh"]]
+            rest = [k for k, m in self.meta.items() if not m["fresh"]]
+            fresh.sort(key=lambda k: self.snapshot.get(k, (0.0,))[0],
+                       reverse=True)
+            rest.sort()
+            self.files = [Path(k) for k in fresh + rest]
+            self.formats = [self.meta[k]["fmt"] for k in fresh + rest]
+            self.batch_iids = []
+            self.tree.delete(*self.tree.get_children())
+            self.iids = []
+            for k in fresh + rest:
+                p = Path(k)
+                m = self.meta[k]
+                try:
+                    rel = str(p.relative_to(folder))
+                except ValueError:
+                    rel = p.name
+                iid = self.tree.insert("", "end", values=(
+                    rel, describe_file(p), labels[m["fmt"]], m["status"]),
+                    tags=(m["tag"],) if m["tag"] else ())
+                self.iids.append(iid)
+            self.progress.configure(maximum=max(1, len(self.files)), value=0)
             self.update_font_visibility()
 
         def update_font_visibility(self):
@@ -2159,6 +2253,9 @@ def run_gui():
             idx = self.iids.index(row)
             cycle = {"epub": "xtc", "xtc": "xtch", "xtch": "epub"}
             self.formats[idx] = cycle.get(self.formats[idx], "epub")
+            m = self.meta.get(str(self.files[idx]))
+            if m:
+                m["fmt"] = self.formats[idx]
             self.tree.set(row, "format", format_labels()[self.formats[idx]])
             self.update_font_visibility()
 
@@ -2173,6 +2270,9 @@ def run_gui():
                 if row in self.iids:
                     idx = self.iids.index(row)
                     self.formats[idx] = fmt
+                    m = self.meta.get(str(self.files[idx]))
+                    if m:
+                        m["fmt"] = fmt
                     self.tree.set(row, "format", labels[fmt])
             self.update_font_visibility()
 
@@ -2266,6 +2366,11 @@ def run_gui():
                             self.tree.set(iid, "status", text)
                             self.tree.item(iid, tags=(tag,))
                             self.tree.see(iid)
+                            if idx < len(self.files):
+                                m = self.meta.get(str(self.files[idx]))
+                                if m:
+                                    m["status"] = text
+                                    m["tag"] = tag
                     elif kind == "progress":
                         self.progress.configure(maximum=max(1, msg[2]), value=msg[1])
                     elif kind == "waiting":
@@ -2301,8 +2406,9 @@ def run_gui():
         ttk.Style().theme_use("clam")
     except Exception:
         pass
-    App(root)
+    app = App(root)
     root.mainloop()
+    return app
 
 
 # ---------------------------------------------------------------------- CLI

@@ -55,6 +55,10 @@ search every 5 seconds** until the reader appears (or until you press "Stop").
 If the IP has changed, it will find the reader at the new address. You can
 enable File Transfer even after the conversion has started.
 
+The book folder is monitored continuously: **new and changed files appear
+in the list automatically** (at the top of the list, most recent first) —
+no need to press "Scan folder".
+
 You can also send only part of the list: select the rows you want
 (Cmd/Shift+click) and press "Convert & Send" — only those will be processed.
 With nothing selected, everything is sent.

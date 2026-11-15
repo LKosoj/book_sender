@@ -428,6 +428,13 @@ def main():
     s12 = json.loads(bs.xtc_settings_file(tmp, font_pt=12).read_text())
     assert s14["font"]["size"] == 42 and s12["font"]["size"] == 36, (s14, s12)
     print("шрифт XTC: 14pt -> 42px, 12pt -> 36px — ОК")
+    # мониторинг папки: сравнение снимков
+    snap = {"a.fb2": (1.0, 10), "b.epub": (2.0, 20)}
+    cur = {"a.fb2": (1.5, 12), "b.epub": (2.0, 20), "c.pdf": (3.0, 30)}
+    added, changed, removed = bs.snapshot_diff(snap, cur)
+    assert added == ["c.pdf"] and changed == ["a.fb2"] and removed == [], \
+        (added, changed, removed)
+    print("мониторинг папки: snapshot_diff — ОК")
     # i18n: каталоги, автоопределение, фолбэк
     locales = Path(bs.__file__).resolve().parent / "locales"
     langs = bs.available_languages()
