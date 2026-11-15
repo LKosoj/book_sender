@@ -42,7 +42,10 @@ python setup.py --xtc      # 可选：XTC 转换器（需要 Node.js 和 git）
 - 从终端：`python book_sender.py`（或 `.venv/bin/python book_sender.py`，
   Windows 上为 `.venv\Scripts\python.exe book_sender.py`）
 
-启动器会自动使用 `.venv`（如存在）。
+启动器在**首次运行时会自动安装所需的一切**：创建 `.venv`、安装 Pillow 和
+PyMuPDF、下载字体，并提示安装 pandoc（通过系统包管理器）。唯一的前提是
+**Python 3.9+**。无需单独运行 `setup.py`——它会自动执行；也可手动运行以重建
+环境，或加 `--xtc`。
 
 ## 准备阅读器（唯一的手动步骤）
 

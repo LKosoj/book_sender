@@ -1,26 +1,41 @@
 @echo off
-rem BookSender launcher for Windows. Prefers the project .venv (Pillow/PyMuPDF).
+rem BookSender launcher for Windows.
+rem On first run it installs dependencies (setup.py), then starts the app.
 setlocal
 cd /d "%~dp0"
+set "VENV=.venv\Scripts\python.exe"
 
-if exist ".venv\Scripts\python.exe" (
-    ".venv\Scripts\python.exe" book_sender.py %*
-    goto :end
+rem --- auto-install if venv missing or dependencies incomplete ---
+set "NEED_SETUP="
+if not exist "%VENV%" set "NEED_SETUP=1"
+if not defined NEED_SETUP (
+    "%VENV%" -c "import PIL, pymupdf, tkinter" >nul 2>nul || set "NEED_SETUP=1"
 )
-py -3 -c "import tkinter" >nul 2>nul && (
-    py -3 book_sender.py %*
-    goto :end
+if defined NEED_SETUP (
+    echo First run: installing dependencies...
+    set "BASE="
+    py -3 -c "import sys" >nul 2>nul && set "BASE=py -3"
+    if not defined BASE python -c "import sys" >nul 2>nul && set "BASE=python"
+    if not defined BASE (
+        echo Python not found. Install Python 3.9+ from https://python.org
+        echo ^(enable "Add to PATH" and tcl/tk during setup^), then run this again.
+        pause
+        exit /b 1
+    )
+    %BASE% setup.py
+    if errorlevel 1 (
+        echo Setup failed.
+        pause
+        exit /b 1
+    )
 )
-python -c "import tkinter" >nul 2>nul && (
-    python book_sender.py %*
-    goto :end
-)
-echo Python with tkinter was not found.
-echo Install Python from python.org (enable tcl/tk during setup),
-echo then run: python setup.py
-pause
-exit /b 1
 
-:end
+if not exist "%VENV%" (
+    echo Could not create the .venv environment.
+    pause
+    exit /b 1
+)
+
+"%VENV%" book_sender.py %*
 if errorlevel 1 pause
 endlocal

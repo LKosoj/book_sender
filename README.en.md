@@ -45,7 +45,11 @@ the project folder.
 - From a terminal: `python book_sender.py` (or `.venv/bin/python book_sender.py`,
   on Windows `.venv\Scripts\python.exe book_sender.py`)
 
-The launchers use `.venv` automatically when it exists.
+On **first run the launchers install everything automatically**: they create
+`.venv`, install Pillow and PyMuPDF, download the font, and offer to install
+pandoc (via the OS package manager). The only prerequisite is **Python 3.9+**.
+Running `setup.py` separately is optional — it runs automatically; you can run it
+manually to rebuild the environment or with `--xtc`.
 
 ## Preparing the reader (the only manual step)
 

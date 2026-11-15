@@ -69,8 +69,14 @@ def pick_base_python() -> str:
 
 def make_venv():
     if venv_python().exists():
-        print("✓ .venv уже существует")
-        return
+        # если окружение есть, но без tkinter — пересоздаём с подходящим Python
+        r = subprocess.run([str(venv_python()), "-c", "import tkinter"],
+                           capture_output=True)
+        if r.returncode == 0:
+            print("✓ .venv уже существует")
+            return
+        print("⚠ .venv без tkinter — пересоздаю")
+        shutil.rmtree(VENV, ignore_errors=True)
     base = pick_base_python()
     run([base, "-m", "venv", str(VENV)])
     print("✓ создано окружение .venv")
@@ -114,6 +120,43 @@ def setup_xtc():
     return True
 
 
+def ensure_pandoc():
+    """pandoc нужен для конвертации fb2/docx/… в EPUB. Если его нет —
+    предлагаем поставить через пакетный менеджер ОС (с подтверждением)."""
+    if shutil.which("pandoc"):
+        print("✓ pandoc уже установлен")
+        return
+    print("pandoc не найден — он нужен для конвертации книг в EPUB.")
+    cmd = None
+    if sys.platform == "darwin" and shutil.which("brew"):
+        cmd = ["brew", "install", "pandoc"]
+    elif sys.platform == "win32":
+        if shutil.which("winget"):
+            cmd = ["winget", "install", "--id", "JohnMacFarlane.Pandoc", "-e",
+                   "--accept-source-agreements", "--accept-package-agreements"]
+        elif shutil.which("choco"):
+            cmd = ["choco", "install", "pandoc", "-y"]
+    elif shutil.which("apt-get"):
+        cmd = ["sudo", "apt-get", "install", "-y", "pandoc"]
+    if not cmd:
+        print("  Установите вручную: https://pandoc.org/installing.html")
+        return
+    try:
+        ans = input(f"Поставить pandoc автоматически ({' '.join(cmd)})? [y/N] ")
+        ans = ans.strip().lower()
+    except EOFError:
+        ans = ""
+    if ans in ("y", "yes", "д", "да"):
+        try:
+            run(cmd)
+            print("✓ pandoc установлен")
+        except subprocess.CalledProcessError:
+            print("⚠ авто-установка не удалась — поставьте вручную:")
+            print("  https://pandoc.org/installing.html")
+    else:
+        print("  Пропущено. Установите позже: https://pandoc.org/installing.html")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Установка BookSender с нуля")
     ap.add_argument("--xtc", action="store_true",
@@ -123,6 +166,7 @@ def main():
     make_venv()
     install_deps()
     download_font()
+    ensure_pandoc()
 
     if args.xtc:
         if not setup_xtc():
