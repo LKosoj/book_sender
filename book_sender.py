@@ -102,6 +102,17 @@ def format_labels() -> dict:
 
 def label_to_format(label: str) -> str:
     return {v: k for k, v in format_labels().items()}.get(label, "epub")
+
+
+def selected_subset(files, formats, iids, selected):
+    """Возвращает (files, formats, iids) только для выделенных строк;
+    если ничего не выделено — все. Сохраняет порядок выделения."""
+    if not selected:
+        return list(files), list(formats), list(iids)
+    idxs = [iids.index(r) for r in selected if r in iids]
+    return ([files[i] for i in idxs],
+            [formats[i] if i < len(formats) else "epub" for i in idxs],
+            [iids[i] for i in idxs])
 # Размеры шрифта как в прошивке (встроенный Noto Sans: 12/14/16/18 pt)
 XTC_FONT_PT_SIZES = (12, 14, 16, 18)
 SCREEN_PPI = 217  # 4.3", 800×480 -> px = pt × 217/72
@@ -1864,7 +1875,9 @@ def run_gui():
             self.stop_event = threading.Event()
             self.worker = None
             self.files = []
+            self.formats = []
             self.iids = []
+            self.batch_iids = []
             self.settings = self.load_settings()
             set_language(self.settings.get("language", "auto"))
             root.title(t("app.title", app=APP_NAME))
@@ -2185,8 +2198,13 @@ def run_gui():
                 xtc_font_pt = int(self.xtc_font_pt_var.get())
             except (ValueError, tk.TclError):
                 xtc_font_pt = 14
-            files = list(self.files)
-            for iid in self.iids:
+            sel = self.tree.selection()
+            files, formats, iids = selected_subset(
+                self.files, formats, self.iids, sel)
+            self.batch_iids = iids
+            if sel:
+                self.log(t("log.batch_selected", n=len(files)))
+            for iid in iids:
                 self.tree.set(iid, "status", t("status.queued"))
             self.set_busy(True)
             self.stop_event.clear()
@@ -2242,8 +2260,9 @@ def run_gui():
                         self.log_text.configure(state="disabled")
                     elif kind == "row":
                         _, idx, text, tag = msg
-                        if idx < len(self.iids):
-                            iid = self.iids[idx]
+                        batch_iids = getattr(self, "batch_iids", self.iids)
+                        if idx < len(batch_iids):
+                            iid = batch_iids[idx]
                             self.tree.set(iid, "status", text)
                             self.tree.item(iid, tags=(tag,))
                             self.tree.see(iid)

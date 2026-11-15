@@ -41,6 +41,7 @@
   "log.search_stopped": "搜索已停止。",
   "log.search_error": "✗ 搜索出错：{error}",
   "log.found_files": "在 {folder} 中找到 {count} 个文件",
+  "log.batch_selected": "仅发送选中的文件：{n} 个",
   "log.select_rows": "请在列表中选中若干行 (Cmd+点击)，然后应用格式。",
   "log.stopped_user": "已被用户停止。",
   "log.device_error": "✗ 设备错误：{error}。请确认阅读器处于 File Transfer 模式，且地址正确。",

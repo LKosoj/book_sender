@@ -55,6 +55,10 @@ search every 5 seconds** until the reader appears (or until you press "Stop").
 If the IP has changed, it will find the reader at the new address. You can
 enable File Transfer even after the conversion has started.
 
+You can also send only part of the list: select the rows you want
+(Cmd/Shift+click) and press "Convert & Send" — only those will be processed.
+With nothing selected, everything is sent.
+
 Re-running is safe: already-uploaded books are skipped (including those sorted
 into author folders). Overwrite mode replaces old copies.
 
