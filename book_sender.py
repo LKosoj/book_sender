@@ -50,7 +50,11 @@ from urllib import error, parse, request
 from i18n import t, set_language, current_language, available_languages
 
 APP_NAME = "BookSender"
-SETTINGS_FILE = Path(__file__).resolve().with_name("book_sender_settings.json")
+# Путь к настройкам: можно переопределить переменной окружения
+# BOOKSENDER_SETTINGS (используется тестами, чтобы не трогать ваши настройки)
+_settings_env = os.environ.get("BOOKSENDER_SETTINGS")
+SETTINGS_FILE = (Path(_settings_env) if _settings_env
+                 else Path(__file__).resolve().with_name("book_sender_settings.json"))
 VENDOR_CLI = (Path(__file__).resolve().parent / "vendor"
               / "epub-to-xtc-converter" / "cli")
 XTC_SETTINGS = Path(__file__).resolve().with_name("xtc_settings.json")
@@ -2067,6 +2071,7 @@ def run_gui():
             if d:
                 self.folder_var.set(d)
                 self.scan_files()
+                self.save_settings()  # выбор папки сохраняется сразу
 
         def change_language(self, event=None):
             choice = self.lang_var.get()
