@@ -96,7 +96,7 @@ forever; interrupt with Ctrl+C.
 | `.fb2` | pandoc → EPUB; images and the cover are preserved, file name = "Author - Title" from the metadata |
 | `.fb2.zip`, `.fbz`, `.zip` | unpacking (`.fbz` is how Flibusta serves a zip with fb2, including cp866 file names), each file inside is converted |
 | `.7z`, `.rar` | the same, via the external `7z` |
-| `.epub` | copied as is (broken EPUBs are fixed by the built-in EPUB Optimizer on the reader) |
+| `.epub` | optimized (CSS/fonts/images) and **structurally validated** (zip, mimetype, OPF, spine): corrupt ones are flagged and not uploaded, minor issues are fixed by the built-in EPUB Optimizer on the reader |
 | `.xtc`, `.xtch` | native reader formats (pre-rendered pages) — copied as is, open without indexing |
 | `.docx`, `.odt`, `.rtf`, `.html`, `.md`, `.txt` | pandoc → EPUB (relative images in HTML and md are picked up; base64 works in md too) |
 | `.pdf` | **Fully automatic.** PDF with text → EPUB with images (text and images are extracted with PyMuPDF and reflowed for the screen, no Calibre needed). Complex layout (2+ text columns, tables/diagrams — detected by the amount of vector graphics, landscape slides) and PDFs without text (scans) → XTC by rendering pages with white-margin cropping and dithering. Manually picking XTC/XTCH in the "Format" column forces page rendering |

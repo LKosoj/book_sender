@@ -672,6 +672,34 @@ def main():
         assert (storage / "XtcBooks" / "note.epub").is_file(), "фолбэк на EPUB"
         print("XTC: выбор формата, папка автора, фолбэк на EPUB — ОК")
 
+        # 7c) проверка структуры EPUB: битый -> пропуск, валидный -> ок,
+        #     мелкий огрех (mimetype) -> предупреждение, но отправляется
+        ec = tmp / "epubcheck_src"
+        ec.mkdir()
+        (ec / "broken.epub").write_bytes(b"this is not a zip file")
+        v = bs.validate_epub(ec / "broken.epub")
+        assert v["fatal"] and v["problems"], v
+        logs_b = []
+        sb, _, eb = bs.run_batch([ec / "broken.epub"], host, "/EpubCheck",
+                                 False, tools, logs_b.append)
+        assert eb == 1 and sb == 0, (sb, eb, logs_b)
+        assert not list((storage / "EpubCheck").rglob("*.epub")), "битый не должен уйти"
+        assert not bs.validate_epub(fixtures / "ready.epub")["problems"]
+        wrong = ec / "wrongmime.epub"
+        with zipfile.ZipFile(fixtures / "ready.epub") as zin:
+            with zipfile.ZipFile(wrong, "w") as zout:
+                for item in zin.infolist():
+                    data = zin.read(item.filename)
+                    if item.filename == "mimetype":
+                        data = b"text/plain"
+                    zout.writestr(item, data)
+        vw = bs.validate_epub(wrong)
+        assert vw["problems"] and not vw["fatal"], vw
+        logs_w = []
+        sw, _, ew = bs.run_batch([wrong], host, "/EpubCheck", False, tools, logs_w.append)
+        assert ew == 0 and sw == 1, (sw, ew, logs_w)
+        print("проверка EPUB: битый пропущен, валидный ок, огрех -> предупреждение — ОК")
+
         # 8) CLI end-to-end
         r = subprocess.run(
             [sys.executable, str(Path(bs.__file__)), "--cli",

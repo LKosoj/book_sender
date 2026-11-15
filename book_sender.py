@@ -278,6 +278,63 @@ def epub_author(path: Path) -> str:
         return ""
 
 
+def validate_epub(path: Path) -> dict:
+    """Лёгкая проверка структуры EPUB (не полный epubcheck): целостность zip,
+    mimetype, container.xml, OPF и непустой spine. Возвращает
+    {"problems": [...], "fatal": bool}. fatal=True — книга не откроется,
+    такие не отправляем; мелкие огрехи (mimetype) лечит оптимизатор читалки."""
+    problems = []
+    fatal = False
+    try:
+        with zipfile.ZipFile(path) as z:
+            bad = z.testzip()
+            if bad is not None:
+                problems.append(t("epub.bad_entry", name=bad))
+                fatal = True
+            names = z.namelist()
+            low = {n.lower(): n for n in names}
+            if "mimetype" not in low:
+                problems.append(t("epub.no_mimetype"))
+            else:
+                mt = z.read(low["mimetype"]).decode("ascii", "replace").strip()
+                if mt != "application/epub+zip":
+                    problems.append(t("epub.bad_mimetype", mt=mt))
+            cont = low.get("meta-inf/container.xml")
+            opf = None
+            if not cont:
+                problems.append(t("epub.no_container"))
+                fatal = True
+            else:
+                try:
+                    cxml = z.read(cont).decode("utf-8", "replace")
+                    m = re.search(r'full-path=["\']([^"\']+)["\']', cxml)
+                    if m and m.group(1) in names:
+                        opf = m.group(1)
+                except Exception:
+                    pass
+                if opf is None:
+                    opf = next((n for n in names if n.lower().endswith(".opf")), None)
+                if opf is None:
+                    problems.append(t("epub.no_opf"))
+                    fatal = True
+                else:
+                    try:
+                        oxml = z.read(opf).decode("utf-8", "replace").lower()
+                        if "<spine" not in oxml or "itemref" not in oxml:
+                            problems.append(t("epub.empty_spine"))
+                            fatal = True
+                    except Exception:
+                        problems.append(t("epub.no_opf"))
+                        fatal = True
+    except zipfile.BadZipFile:
+        problems.append(t("epub.not_zip"))
+        fatal = True
+    except Exception as e:
+        problems.append(t("epub.read_error", error=e))
+        fatal = True
+    return {"problems": problems, "fatal": fatal}
+
+
 # --------------------------------------------------------------- метаданные
 
 def fb2_meta(path: Path) -> dict:
@@ -1481,6 +1538,18 @@ def run_batch(files, host, dest, replace_existing, tools, log, stop=None,
                     except Exception as e:
                         log(t("log.optimize_skipped", name=epub.name, error=e))
                 author = author_folder_name(epub_author(epub))
+                v = validate_epub(epub)
+                if v["problems"]:
+                    joined = "; ".join(v["problems"])
+                    if v["fatal"]:
+                        errors += 1
+                        log(t("log.epub_fatal", name=epub.name, problems=joined))
+                        if on_file:
+                            on_file(idx, t("status.epub_broken"), "err")
+                        continue
+                    log(t("log.epub_problems", name=epub.name, problems=joined))
+                    if on_file:
+                        on_file(idx, t("status.epub_warning"), "skip")
             fmt = formats[idx] if formats and idx < len(formats) else "epub"
             if fmt in ("xtc", "xtch") and settings is not None:
                 if on_file:

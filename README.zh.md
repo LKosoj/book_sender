@@ -89,7 +89,7 @@ python book_sender.py --cli --folder ~/books --lang en   # 消息语言
 | `.fb2` | pandoc → EPUB；保留图片和封面，文件名取自元数据中的「作者 - 书名」 |
 | `.fb2.zip`、`.fbz`、`.zip` | 解压（`.fbz` 是 Flibusta 提供 fb2 zip 包的方式；包括 cp866 编码的文件名），并转换其中每个文件 |
 | `.7z`、`.rar` | 同上，通过外部 `7z` 处理 |
-| `.epub` | 原样复制（损坏的 EPUB 可用阅读器内置的 EPUB Optimizer 修复） |
+| `.epub` | 优化处理（CSS/字体/图片）并进行**结构校验**（zip、mimetype、OPF、spine）：损坏的会被标记且不上传，小问题由阅读器内置的 EPUB Optimizer 修复 |
 | `.xtc`、`.xtch` | 阅读器原生格式（预渲染页面）——原样复制，无需索引即可打开 |
 | `.docx`、`.odt`、`.rtf`、`.html`、`.md`、`.txt` | pandoc → EPUB（HTML 和 md 中的相对路径图片会被读取；md 中也支持 base64） |
 | `.pdf` | **全自动处理。** 有文本层的 PDF → 带图片的 EPUB（文本与图像由 PyMuPDF 提取，并按屏幕重新排版，无需 Calibre）。复杂版式（2 栏以上文本、表格/示意图——按矢量图形数量判断、横向幻灯片页）以及无文本层的 PDF（扫描版）→ 逐页渲染为 XTC，带白边裁剪与抖动处理。在「格式」列手动选择 XTC/XTCH 会强制启用逐页渲染 |
