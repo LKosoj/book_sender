@@ -137,3 +137,7 @@ python book_sender.py --cli --folder ~/books --lang en   # 消息语言
 - 如果搜索不到设备：请确认 File Transfer 已开启、网络互通
   （访客 Wi-Fi 会隔离客户端），并手动输入屏幕上显示的 IP。
 - 设置（文件夹、地址、模式、语言）会在多次运行之间保留。
+
+## 许可证
+
+MIT — 见 [LICENSE](LICENSE)。

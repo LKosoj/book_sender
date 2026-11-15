@@ -143,3 +143,7 @@ or with the CLI flag `--lang ru|en|zh`. The choice is remembered.
   network is shared (guest Wi-Fi isolates clients), and enter the IP from the
   screen manually.
 - Settings (folder, address, mode, language) are saved between runs.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
