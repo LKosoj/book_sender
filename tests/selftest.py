@@ -484,6 +484,8 @@ def main():
             files, host, "/Books", False, tools, logs.append)
         print("\n".join(logs))
         assert errors == 0, f"ошибки в первом прогоне: {errors}"
+        assert (storage / "fonts" / "DejaVuSerif.ttf").is_file(), \
+            "шрифт DejaVu Serif должен автоматически загрузиться на устройство"
         books = storage / "Books"
         names = {str(p.relative_to(books)) for p in books.rglob("*") if p.is_file()}
         print("на «SD»:", sorted(names))

@@ -107,8 +107,8 @@ python book_sender.py --cli --folder ~/books --ascii-symbols   # 箭头 -> ASCII
   - **结构校验**：损坏的 EPUB 不会被发送；
   - 可选 — **少见符号替换**：阅读器字体中缺失的箭头和对勾（`→` `⇒` `✓`）
     会替换为 ASCII（`->` `=>` `v`）——勾选「替换少见符号」或使用
-    `--ascii-symbols`。另一种方法是在阅读器上安装包含这些符号的字体
-    （例如 DejaVu Serif）。
+    `--ascii-symbols`。另一种方法是使用 **DejaVu Serif** 字体：应用会在连接时
+    **自动将其上传到阅读器**（如果尚未安装）；只需在阅读器的字体设置中选择它。
 - cp1251 编码的 FB2 会自动重编码为 UTF-8。
 
 ## 秒开：XTC 与 XTCH

@@ -1644,6 +1644,30 @@ def wait_for_device(host, log, stop=None, interval=5, timeout=0, on_attempt=None
             raise DeviceError(f"устройство не появилось за {timeout} с")
 
 
+READER_FONT_NAME = "DejaVuSerif.ttf"
+
+
+def ensure_reader_font(dev, log) -> bool:
+    """Загружает DejaVu Serif в /fonts устройства, если его там нет:
+    в нём есть стрелки и кириллица, которых нет во встроенных шрифтах
+    CrossPoint. Ошибка не блокирует отправку книг."""
+    local = Path(__file__).resolve().with_name("fonts") / READER_FONT_NAME
+    if not local.is_file():
+        return False
+    try:
+        entries = dev.list_dir("/fonts") or []
+        if any(e.get("name", "").casefold() == READER_FONT_NAME.casefold()
+               for e in entries):
+            return True
+        dev.ensure_dir("/fonts")
+        dev.upload(local, "/fonts", True)
+        log(t("log.font_uploaded"))
+        return True
+    except Exception as e:
+        log(t("log.font_failed", error=e))
+        return False
+
+
 def run_batch(files, host, dest, replace_existing, tools, log, stop=None,
               on_file=None, on_progress=None, wait_timeout=0,
               on_device=None, on_waiting=None, by_author=True, optimize=True,
@@ -1850,6 +1874,7 @@ def run_batch(files, host, dest, replace_existing, tools, log, stop=None,
 
         # Фаза 3: отправка
         dev = Device(host)
+        ensure_reader_font(dev, log)
         dev.ensure_dir(dest)
         existing = dev.list_recursive(dest, stop)  # name.lower -> полный путь
         log(t("log.folder_count", dest=dest, n=len(existing)))
