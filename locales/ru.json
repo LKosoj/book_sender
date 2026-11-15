@@ -71,7 +71,7 @@
   "log.pdf_reflow": "  ▤ {name} → {out} (перенабор текста)",
   "log.prep_done": "Подготовка завершена: {n} файлов готовы к отправке. Подключаюсь к устройству…",
   "log.device_info": "Устройство: {device} / {family} v{version} ({mode}) по адресу {host}",
-  "log.font_uploaded": "Шрифт Gentium Book Plus загружен на читалку (/fonts) — выберите его в Settings > Reader > Font Family, чтобы отображались стрелки, галочки и кириллица",
+  "log.font_uploaded": "Шрифт {family} загружен на читалку (/fonts) — выберите его в Settings > Reader > Font Family",
   "log.font_failed": "Не удалось загрузить шрифт на читалку: {error} (книги всё равно отправятся)",
   "log.folder_count": "Папка {dest}: {n} файл(ов) с учётом вложенных папок",
   "log.already_on_device": "  = уже на устройстве: {path}",

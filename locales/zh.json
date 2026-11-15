@@ -71,7 +71,7 @@
   "log.pdf_reflow": "  ▤ {name} → {out}（文本重排）",
   "log.prep_done": "准备完成：{n} 个文件已就绪。正在连接设备…",
   "log.device_info": "设备：{device} / {family} v{version} ({mode})，地址 {host}",
-  "log.font_uploaded": "Gentium Book Plus 字体已上传到阅读器（/fonts）——请在 Settings > Reader > Font Family 中选择它，以显示箭头、对勾和西里尔字母",
+  "log.font_uploaded": "{family} 字体已上传到阅读器（/fonts）——请在 Settings > Reader > Font Family 中选择它",
   "log.font_failed": "无法将字体上传到阅读器：{error}（不影响图书发送）",
   "log.folder_count": "文件夹 {dest}：共 {n} 个文件（含子文件夹）",
   "log.already_on_device": "  = 设备上已存在：{path}",

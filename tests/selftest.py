@@ -486,6 +486,16 @@ def main():
         assert errors == 0, f"ошибки в первом прогоне: {errors}"
         assert (storage / "fonts" / "GentiumBookPlus" / "GentiumBookPlus-Regular.ttf").is_file(), \
             "шрифт Gentium Book Plus должен автоматически загрузиться на устройство"
+        # смена языка интерфейса -> загружается шрифт нового языка
+        bs.set_language("en")
+        assert bs.ensure_reader_font(bs.Device(host), logs.append)
+        assert (storage / "fonts" / "CharisSIL" / "CharisSIL-Regular.ttf").is_file(), \
+            "при английском интерфейсе должен загрузиться Charis SIL"
+        bs.set_language("zh")
+        assert bs.ensure_reader_font(bs.Device(host), logs.append)
+        assert (storage / "fonts" / "NotoSerifSC" / "NotoSerifSC_14.cpfont").is_file(), \
+            "при китайском интерфейсе должен загрузиться Noto Serif SC (.cpfont)"
+        bs.set_language("ru")
         books = storage / "Books"
         names = {str(p.relative_to(books)) for p in books.rglob("*") if p.is_file()}
         print("на «SD»:", sorted(names))

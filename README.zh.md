@@ -107,9 +107,10 @@ python book_sender.py --cli --folder ~/books --ascii-symbols   # 箭头 -> ASCII
   - **结构校验**：损坏的 EPUB 不会被发送；
   - 可选 — **少见符号替换**：阅读器字体中缺失的箭头和对勾（`→` `⇒` `✓`）
     会替换为 ASCII（`->` `=>` `v`）——勾选「替换少见符号」或使用
-    `--ascii-symbols`。另一种方法是使用 **Gentium Book Plus** 字体（含真正的
-    粗体和斜体）：应用会在连接时**自动将其上传到阅读器**（如果尚未安装）；
-    只需在 Settings > Reader > Font Family 中选择它。
+    `--ascii-symbols`。另一种方法是使用包含这些符号的字体：应用会在连接时
+    以及切换界面语言时**自动将其上传到阅读器**——**Gentium Book Plus**（俄语）、
+    **Charis SIL**（英语）、**Noto Serif SC / 思源宋体**（中文）。
+    只需在 Settings > Reader > Font Family 中选择字体。
 - cp1251 编码的 FB2 会自动重编码为 UTF-8。
 
 ## 秒开：XTC 与 XTCH

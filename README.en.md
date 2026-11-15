@@ -114,9 +114,10 @@ forever; interrupt with Ctrl+C.
   - optionally — **rare-symbol substitution**: arrows and check marks missing
     from reader fonts (`→` `⇒` `✓`) are replaced with ASCII (`->` `=>` `v`) —
     the "Replace rare symbols" checkbox or `--ascii-symbols`. Alternatively,
-    the **Gentium Book Plus** font (with real bold and italic): the app
-    **uploads it to the reader automatically** on connect (if missing); just
-    select it in Settings > Reader > Font Family.
+    fonts with these symbols: the app **uploads them to the reader automatically**
+    on connect and when the interface language changes — **Gentium Book Plus**
+    (Russian), **Charis SIL** (English), **Noto Serif SC / 思源宋体** (Chinese).
+    Just select the font in Settings > Reader > Font Family.
 - FB2 files in cp1251 encoding are automatically re-encoded to UTF-8.
 
 ## Instant opening: XTC and XTCH

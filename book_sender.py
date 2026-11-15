@@ -1644,35 +1644,47 @@ def wait_for_device(host, log, stop=None, interval=5, timeout=0, on_attempt=None
             raise DeviceError(f"устройство не появилось за {timeout} с")
 
 
-READER_FONT_FAMILY = "GentiumBookPlus"
-READER_FONT_FILES = (
-    "GentiumBookPlus-Regular.ttf",
-    "GentiumBookPlus-Bold.ttf",
-    "GentiumBookPlus-Italic.ttf",
-    "GentiumBookPlus-BoldItalic.ttf",
-)
+# Семейства шрифтов для чтения по языку интерфейса: полные стрелки/галочки,
+# кириллица/латиница и настоящие жирный с курсивом.
+READER_FONTS = {
+    "ru": ("GentiumBookPlus", (
+        "GentiumBookPlus-Regular.ttf", "GentiumBookPlus-Bold.ttf",
+        "GentiumBookPlus-Italic.ttf", "GentiumBookPlus-BoldItalic.ttf")),
+    "en": ("CharisSIL", (
+        "CharisSIL-Regular.ttf", "CharisSIL-Bold.ttf",
+        "CharisSIL-Italic.ttf", "CharisSIL-BoldItalic.ttf")),
+    # Китайский: .cpfont (2-битные битмапы CrossPoint), по файлу на размер.
+    # Полный CJK-набор (21606 иероглифов), шрифт Noto Serif SC / 思源宋体 (OFL).
+    "zh": ("NotoSerifSC", (
+        "NotoSerifSC_12.cpfont", "NotoSerifSC_14.cpfont",
+        "NotoSerifSC_16.cpfont", "NotoSerifSC_18.cpfont")),
+}
 
 
-def ensure_reader_font(dev, log) -> bool:
-    """Загружает семейство Gentium Book Plus (regular/bold/italic/bold-italic)
-    в /fonts/<семейство> устройства, если его там нет: полная кириллица,
-    стрелки и галочки, которых нет во встроенных шрифтах CrossPoint, плюс
-    настоящие жирный и курсив для книг. Ошибка не блокирует отправку книг."""
-    local_dir = Path(__file__).resolve().with_name("fonts") / READER_FONT_FAMILY
-    if not (local_dir / READER_FONT_FILES[0]).is_file():
+def ensure_reader_font(dev, log, lang=None) -> bool:
+    """Загружает семейство шрифта для языка интерфейса в /fonts устройства,
+    если его там нет (ru -> Gentium Book Plus, en -> Charis SIL,
+    zh -> Noto Serif SC в формате .cpfont). Ошибка не блокирует отправку книг."""
+    lang = lang or current_language()
+    spec = READER_FONTS.get(lang)
+    if spec is None:
         return False
-    remote_dir = "/fonts/" + READER_FONT_FAMILY
+    family, files = spec
+    local_dir = Path(__file__).resolve().with_name("fonts") / family
+    if not (local_dir / files[0]).is_file():
+        return False
+    remote_dir = "/fonts/" + family
     try:
         entries = dev.list_dir(remote_dir) or []
         names = {e.get("name", "").casefold() for e in entries}
-        if READER_FONT_FILES[0].casefold() in names:
+        if files[0].casefold() in names:
             return True
         dev.ensure_dir(remote_dir)
-        for fn in READER_FONT_FILES:
+        for fn in files:
             f = local_dir / fn
             if f.is_file():
                 dev.upload(f, remote_dir, True)
-        log(t("log.font_uploaded"))
+        log(t("log.font_uploaded", family=family))
         return True
     except Exception as e:
         log(t("log.font_failed", error=e))
@@ -2183,6 +2195,24 @@ def run_gui():
             set_language(code)
             self.save_settings()
             self.rebuild_ui()
+            self._upload_font_for_language()
+
+        def _upload_font_for_language(self):
+            """При смене языка сразу пробуем загрузить шрифт нового языка,
+            если известен адрес устройства. Офлайн — загрузим при отправке."""
+            host = self.host_var.get().strip()
+            if not host or self.busy:
+                return
+
+            def work():
+                try:
+                    dev = Device(host)
+                    dev.status()
+                    ensure_reader_font(dev, self.log)
+                except Exception:
+                    pass
+
+            threading.Thread(target=work, daemon=True).start()
 
         def rebuild_ui(self):
             """Пересборка интерфейса при смене языка с сохранением списка файлов."""
