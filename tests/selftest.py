@@ -698,7 +698,11 @@ def main():
         logs_w = []
         sw, _, ew = bs.run_batch([wrong], host, "/EpubCheck", False, tools, logs_w.append)
         assert ew == 0 and sw == 1, (sw, ew, logs_w)
-        print("проверка EPUB: битый пропущен, валидный ок, огрех -> предупреждение — ОК")
+        uploaded = storage / "EpubCheck" / "wrongmime.epub"
+        with zipfile.ZipFile(uploaded) as z:
+            assert z.read("mimetype").decode().strip() == "application/epub+zip", \
+                "mimetype должен быть починен при обработке"
+        print("проверка EPUB: битый пропущен, mimetype починен — ОК")
 
         # 8) CLI end-to-end
         r = subprocess.run(

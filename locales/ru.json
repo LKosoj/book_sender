@@ -56,7 +56,7 @@
   "log.optimize_images_no": " (картинки: нет Pillow — пропуск)",
   "log.xtc_not_installed": "⚠ XTC-конвертер не установлен (запустите setup_xtc.command) — книги будут отправлены в EPUB.",
   "log.xtc_font": "XTC-конвертация: шрифт {pt}pt (≈{px}px на экране 480×800); больше шрифт — больше страниц и файл",
-  "log.optimized": "  ⚙ {name}: {before}→{after} КБ [шрифты −{fonts}, CSS +{css}/−{css_clean} вредн., коммент. −{comments}, картинки {images}]",
+  "log.optimized": "  ⚙ {name}: {before}→{after} КБ [шрифты −{fonts}, CSS +{css}/−{css_clean} вредн., коммент. −{comments}, картинки {images}, починено {repairs}]",
   "log.optimize_skipped": "  ⚠ оптимизация {name} пропущена: {error}",
   "log.xtc_done": "  ▤ {name} → {out} ({mb} МБ, {kb} КБ)",
   "log.xtc_fallback": "  ⚠ XTC не получился ({error}) — отправлю EPUB",

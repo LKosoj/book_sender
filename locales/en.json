@@ -56,7 +56,7 @@
   "log.optimize_images_no": " (images: no Pillow — skipped)",
   "log.xtc_not_installed": "⚠ XTC converter not installed (run setup_xtc.command) — books will be sent as EPUB.",
   "log.xtc_font": "XTC conversion: font {pt}pt (≈{px}px on a 480×800 screen); bigger font — more pages and a bigger file",
-  "log.optimized": "  ⚙ {name}: {before}→{after} KB [fonts −{fonts}, CSS +{css}/−{css_clean} harmful, comments −{comments}, images {images}]",
+  "log.optimized": "  ⚙ {name}: {before}→{after} KB [fonts −{fonts}, CSS +{css}/−{css_clean} harmful, comments −{comments}, images {images}, repaired {repairs}]",
   "log.optimize_skipped": "  ⚠ optimization of {name} skipped: {error}",
   "log.xtc_done": "  ▤ {name} → {out} ({mb} MB, {kb} KB)",
   "log.xtc_fallback": "  ⚠ XTC failed ({error}) — sending EPUB",

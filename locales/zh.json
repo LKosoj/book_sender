@@ -56,7 +56,7 @@
   "log.optimize_images_no": " (图片：无 Pillow — 跳过)",
   "log.xtc_not_installed": "⚠ 未安装 XTC 转换器（请运行 setup_xtc.command）— 图书将以 EPUB 发送。",
   "log.xtc_font": "XTC 转换：字号 {pt}pt (480×800 屏幕上 ≈{px}px)；字号越大，页数越多、文件越大",
-  "log.optimized": "  ⚙ {name}: {before}→{after} KB [字体 −{fonts}，有害 CSS +{css}/−{css_clean}，注释 −{comments}，图片 {images}]",
+  "log.optimized": "  ⚙ {name}: {before}→{after} KB [字体 −{fonts}，有害 CSS +{css}/−{css_clean}，注释 −{comments}，图片 {images}，修复 {repairs} 处]",
   "log.optimize_skipped": "  ⚠ {name} 优化已跳过：{error}",
   "log.xtc_done": "  ▤ {name} → {out} ({mb} MB, {kb} KB)",
   "log.xtc_fallback": "  ⚠ XTC 生成失败 ({error}) — 将改发 EPUB",

@@ -617,7 +617,7 @@ def optimize_epub(path: Path, optimize_images: bool = False) -> dict:
     """Оптимизирует EPUB на месте. Возвращает статистику; при любой ошибке
     оставляет исходный файл нетронутым."""
     stats = {"fonts": 0, "css": 0, "css_clean": 0, "comments": 0,
-             "img_attrs": 0, "images": 0,
+             "img_attrs": 0, "images": 0, "repairs": 0,
              "before": path.stat().st_size, "after": path.stat().st_size}
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
@@ -806,6 +806,34 @@ def optimize_epub(path: Path, optimize_images: bool = False) -> dict:
                     changed = True
             except Exception:
                 pass
+
+    # Мелкий ремонт структуры: mimetype и container.xml.
+    mt_key = next((k for k in data if k.lower() == "mimetype"), None)
+    if mt_key is None:
+        data = {"mimetype": b"application/epub+zip", **data}
+        stats["repairs"] += 1
+    else:
+        if data[mt_key].strip() != b"application/epub+zip":
+            data[mt_key] = b"application/epub+zip"
+            stats["repairs"] += 1
+        if mt_key != "mimetype":
+            data["mimetype"] = data.pop(mt_key)
+            mt_key = "mimetype"
+        if list(data.keys())[0] != mt_key:
+            data = {mt_key: data.pop(mt_key), **data}
+            stats["repairs"] += 1
+    if opf_name and "meta-inf/container.xml" not in {k.lower() for k in data}:
+        safe_opf = opf_name.replace("&", "&amp;").replace('"', "&quot;")
+        container = ('<?xml version="1.0" encoding="UTF-8"?>'
+                     '<container version="1.0" '
+                     'xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+                     f'<rootfiles><rootfile full-path="{safe_opf}" '
+                     'media-type="application/oebps-package+xml"/>'
+                     '</rootfiles></container>')
+        data["META-INF/container.xml"] = container.encode("utf-8")
+        stats["repairs"] += 1
+    if stats["repairs"]:
+        changed = True
 
     if changed:
         tmp = path.with_name(path.name + ".opt.tmp")
@@ -1534,7 +1562,7 @@ def run_batch(files, host, dest, replace_existing, tools, log, stop=None,
                                   before=s['before'] // 1024, after=s['after'] // 1024,
                                   fonts=s['fonts'], css=s['css'],
                                   css_clean=s['css_clean'], comments=s['comments'],
-                                  images=s['images']))
+                                  images=s['images'], repairs=s['repairs']))
                     except Exception as e:
                         log(t("log.optimize_skipped", name=epub.name, error=e))
                 author = author_folder_name(epub_author(epub))
