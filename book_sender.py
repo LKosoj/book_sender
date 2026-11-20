@@ -27,10 +27,12 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import importlib.util
 import io
 import json
 import os
+import posixpath
 import queue
 import re
 import shutil
@@ -365,9 +367,17 @@ def validate_epub(path: Path) -> dict:
 
 def fb2_meta(path: Path) -> dict:
     """Название, автор, язык и обложка из FB2 (для имени файла и EPUB)."""
+    try:
+        return fb2_meta_bytes(path.read_bytes())
+    except OSError:
+        return {}
+
+
+def fb2_meta_bytes(data: bytes) -> dict:
+    """fb2_meta для уже прочитанных байт (файл или член zip-архива)."""
     meta: dict = {}
     try:
-        root = ET.parse(path).getroot()
+        root = ET.fromstring(data)
     except Exception:
         return meta
     ti = root.find("fb:description/fb:title-info", FB2_NS)
@@ -407,6 +417,137 @@ def fb2_meta(path: Path) -> dict:
                         pass
                     break
     return meta
+
+
+def zip_fb2_bytes(path: Path) -> bytes | None:
+    """Первый .fb2 внутри zip/fbz (для превью; 7z/rar ради превью не читаем)."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            for info in z.infolist():
+                if info.is_dir():
+                    continue
+                name = info.filename.replace("\\", "/").rsplit("/", 1)[-1]
+                if name.lower().endswith(".fb2") and not name.startswith("._"):
+                    with z.open(info) as f:
+                        return f.read()
+    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile):
+        return None
+    return None
+
+
+def epub_preview(path: Path) -> dict:
+    """Обложка + название/автор EPUB одним чтением архива (для превью):
+    {"cover": bytes, "cover_ext": str, "title": str, "author": str}."""
+    out: dict = {}
+    try:
+        with zipfile.ZipFile(path) as z:
+            container = ET.fromstring(z.read("META-INF/container.xml"))
+            rf = next((el for el in container.iter()
+                       if el.tag.split("}")[-1] == "rootfile"), None)
+            if rf is None or not rf.get("full-path"):
+                return out
+            opf_path = rf.get("full-path")
+            opf = ET.fromstring(z.read(opf_path))
+            base = posixpath.dirname(opf_path)
+            metadata = next((el for el in opf.iter()
+                             if el.tag.split("}")[-1] == "metadata"), None)
+            title = author = cover_id = ""
+            if metadata is not None:
+                for el in metadata.iter():
+                    ln = el.tag.split("}")[-1]
+                    value = (el.text or "").strip()
+                    if ln == "title" and not title and value:
+                        title = value
+                    elif ln == "creator" and not author and value:
+                        author = value
+                    elif (ln == "meta"
+                          and (el.get("name") or "").lower() == "cover"):
+                        cover_id = el.get("content", "")
+            manifest = next((el for el in opf.iter()
+                             if el.tag.split("}")[-1] == "manifest"), None)
+            href = None
+            if manifest is not None:
+                items = [el for el in manifest
+                         if el.tag.split("}")[-1] == "item"]
+                # EPUB 3: properties="cover-image"; EPUB 2: meta name="cover"
+                for item in items:
+                    if ("cover-image" in (item.get("properties") or "").split()
+                            or (cover_id and item.get("id") == cover_id)):
+                        href = item.get("href")
+                        break
+                if not href:
+                    # запасной случай: картинка с id вроде "cover"
+                    for item in items:
+                        if ("cover" in (item.get("id") or "").lower()
+                                and (item.get("media-type") or "")
+                                .startswith("image/")):
+                            href = item.get("href")
+                            break
+            if href:
+                member = posixpath.normpath(
+                    posixpath.join(base, parse.unquote(href)))
+                if not member.startswith("..") and not member.startswith("/"):
+                    ext = posixpath.splitext(member)[1].lower()
+                    if ext not in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
+                        ext = ".jpg"
+                    try:
+                        out["cover"] = z.read(member)
+                        out["cover_ext"] = ext
+                    except KeyError:
+                        pass
+            if title:
+                out["title"] = title
+            if author:
+                out["author"] = author
+    except (OSError, zipfile.BadZipFile, ET.ParseError, StopIteration):
+        return out
+    return out
+
+
+def pdf_cover(path: Path) -> dict:
+    """Первая страница PDF как «обложка» (PNG) + название/автор из метаданных."""
+    out: dict = {}
+    try:
+        import pymupdf
+    except ImportError:
+        return out
+    try:
+        with pymupdf.open(path) as doc:
+            if doc.page_count:
+                zoom = 280 / max(doc[0].rect.height, 1.0)  # высота превью ~280px
+                pix = doc[0].get_pixmap(matrix=pymupdf.Matrix(zoom, zoom))
+                out["cover"] = pix.tobytes("png")
+                out["cover_ext"] = ".png"
+            m = doc.metadata or {}
+            if (m.get("title") or "").strip():
+                out["title"] = m["title"].strip()
+            if (m.get("author") or "").strip():
+                out["author"] = m["author"].strip()
+    except Exception:
+        return {}
+    return out
+
+
+def book_cover(path: Path) -> dict:
+    """Данные для превью обложки в GUI. Формат результата как у fb2_meta:
+    cover/cover_ext/title/author (см. epub_preview). Пустой dict, если
+    обложки нет. Никогда не бросает исключений — превью не должно ломать GUI."""
+    try:
+        ext = path.suffix.lower()
+        if ext == ".fb2":
+            return {k: v for k, v in fb2_meta(path).items() if v}
+        if ext in (".zip", ".fbz"):
+            data = zip_fb2_bytes(path)
+            if data:
+                return {k: v for k, v in fb2_meta_bytes(data).items() if v}
+            return {}
+        if ext == ".epub":
+            return epub_preview(path)
+        if ext == ".pdf":
+            return pdf_cover(path)
+    except Exception:
+        return {}
+    return {}
 
 
 # -------------------------------------------------------------- конвертация
@@ -592,6 +733,7 @@ PROBLEM_CSS_RE = [
 ]
 STYLE_ATTR_RE = re.compile(r'style\s*=\s*"([^"]*)"', re.I)
 SCREEN_BOX = (800, 480)  # экран X4 Pro; картинки вписываем, не увеличивая
+PREVIEW_BOX = (200, 280)  # превью обложки в GUI
 
 
 def strip_xml_comments(t: str):
@@ -1510,6 +1652,52 @@ def find_devices(log=print, stop=None, verbose=True) -> list:
 
 # ------------------------------------------------------------------ пайплайн
 
+def file_sha256(path: Path, stop=None) -> str | None:
+    """SHA-256 содержимого файла (потоково, 1 МБ блоками); None при ошибке чтения."""
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for block in iter(lambda: f.read(1024 * 1024), b""):
+                if stop is not None and stop.is_set():
+                    return None
+                h.update(block)
+    except OSError:
+        return None
+    return h.hexdigest()
+
+
+def find_duplicates(files, stop=None) -> dict:
+    """Дубликаты по содержимому: {путь_копии: путь_оригинала}.
+    Оригинал — первый файл в порядке списка. Сначала группируем по размеру:
+    файлы с уникальным размером дубликатами быть не могут и не хэшируются.
+    Разные форматы одной книги (fb2 и epub) содержимым не совпадают —
+    это не дубликаты."""
+    by_size: dict = {}
+    for p in files:
+        if stop is not None and stop.is_set():
+            break
+        try:
+            by_size.setdefault(p.stat().st_size, []).append(p)
+        except OSError:
+            continue
+    seen: dict = {}
+    dups: dict = {}
+    for _size, group in sorted(by_size.items()):
+        if len(group) < 2:
+            continue
+        for p in group:
+            if stop is not None and stop.is_set():
+                break
+            digest = file_sha256(p, stop)
+            if digest is None:
+                continue
+            if digest in seen:
+                dups[str(p)] = seen[digest]
+            else:
+                seen[digest] = p
+    return dups
+
+
 def scan_folder(folder: Path, recursive=True) -> list:
     files = []
     if recursive:
@@ -1549,11 +1737,12 @@ def describe_file(p: Path) -> str:
 
 
 def convert_all(files, stage: Path, tools, log, stop=None, on_file=None,
-                on_progress=None, formats=None):
+                on_progress=None, formats=None, duplicates=None):
     """Фаза 1: конвертация всех файлов в stage, НЕ дожидаясь устройства.
     Возвращает (tasks, skipped, errors, page_tasks); tasks = список
     (idx_файла, путь_epub); page_tasks = [(idx, путь)] — PDF и DjVu,
-    которые обрабатываются постранично (в EPUB с перенабором или в XTC)."""
+    которые обрабатываются постранично (в EPUB с перенабором или в XTC).
+    duplicates — карта find_duplicates: копии пропускаются до конвертации."""
     tasks = []
     page_tasks = []
     skipped = errors = 0
@@ -1561,6 +1750,15 @@ def convert_all(files, stage: Path, tools, log, stop=None, on_file=None,
     for idx, src in enumerate(files):
         if stop is not None and stop.is_set():
             raise Cancelled()
+        first = (duplicates or {}).get(str(src))
+        if first:
+            skipped += 1
+            log(t("log.duplicate", name=src.name, first=Path(first).name))
+            if on_file:
+                on_file(idx, t("status.duplicate"), "skip")
+            if on_progress:
+                on_progress(idx + 1, total)
+            continue
         if src.suffix.lower() in (".pdf", ".djvu"):
             # PDF: есть текст -> EPUB (перенабор), нет (скан) -> XTC страницами.
             # DjVu: всегда постранично (это картинки страниц).
@@ -1704,10 +1902,15 @@ def run_batch(files, host, dest, replace_existing, tools, log, stop=None,
     sent = skipped = errors = 0
     stage = Path(tempfile.mkdtemp(prefix="booksender_stage_"))
     try:
+        # Дубликаты по содержимому пропускаем всегда, до конвертации
+        duplicates = find_duplicates(files, stop)
+        if duplicates:
+            log(t("log.duplicates_found", n=len(duplicates)))
         # Фаза 1: конвертируем всё сразу, устройство пока не нужно
         tasks, skipped, errors, page_tasks = convert_all(
-            files, stage, tools, log, stop, on_file, on_progress, formats)
-        if not tasks and not pdf_tasks:
+            files, stage, tools, log, stop, on_file, on_progress, formats,
+            duplicates)
+        if not tasks and not page_tasks:
             log(t("log.summary_zero", skipped=skipped, errors=errors))
             return sent, skipped, errors
 
@@ -2002,6 +2205,9 @@ def run_gui():
             self.busy = False
             self.snapshot = {}
             self.meta = {}
+            self._cover_req = 0
+            self._cover_cache = {}  # str(path) -> (размер, dict из book_cover)
+            self._cover_photo = None
             self.settings = self.load_settings()
             set_language(self.settings.get("language", "auto"))
             root.title(t("app.title", app=APP_NAME))
@@ -2140,6 +2346,7 @@ def run_gui():
             self.tree.column("format", width=110, anchor="center")
             self.tree.column("status", width=270, anchor="w")
             self.tree.bind("<Button-1>", self.on_tree_click)
+            self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
             self.tree.tag_configure("ok", foreground="#0a7d32")
             self.tree.tag_configure("err", foreground="#c0392b")
             self.tree.tag_configure("skip", foreground="#888888")
@@ -2147,6 +2354,17 @@ def run_gui():
             self.tree.tag_configure("ready", foreground="#1a5fb4")
             vsb = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
             self.tree.configure(yscrollcommand=vsb.set)
+            preview = ttk.Frame(table_frame)
+            preview.pack(side="right", fill="y", padx=(6, 0))
+            ttk.Label(preview, text=t("gui.preview"),
+                      font=("", 11, "bold")).pack(anchor="center")
+            self.cover_label = tk.Label(preview, text=t("gui.cover_none"),
+                                        foreground="#888", anchor="center",
+                                        width=26, height=12)
+            self.cover_label.pack(padx=2, pady=2)
+            self.cover_info = tk.Label(preview, text="", foreground="#555",
+                                       wraplength=190, justify="center")
+            self.cover_info.pack()
             vsb.pack(side="right", fill="y")
             self.tree.pack(side="left", fill="both", expand=True)
 
@@ -2283,6 +2501,8 @@ def run_gui():
             self.files = []
             self.formats = []
             self.tree.delete(*self.tree.get_children())
+            self._cover_req += 1
+            self._show_preview({})
             self.iids = []
             labels = format_labels()
             for p in paths:
@@ -2354,6 +2574,8 @@ def run_gui():
             self.formats = [self.meta[k]["fmt"] for k in fresh + rest]
             self.batch_iids = []
             self.tree.delete(*self.tree.get_children())
+            self._cover_req += 1
+            self._show_preview({})
             self.iids = []
             for k in fresh + rest:
                 p = Path(k)
@@ -2413,6 +2635,67 @@ def run_gui():
                         m["fmt"] = fmt
                     self.tree.set(row, "format", labels[fmt])
             self.update_font_visibility()
+
+        # ---- превью обложки выбранной книги
+        def on_tree_select(self, _event=None):
+            sel = self.tree.selection()
+            if not sel or sel[0] not in self.iids:
+                self._show_preview({})
+                return
+            path = self.files[self.iids.index(sel[0])]
+            self._cover_req += 1
+            req = self._cover_req
+            key = str(path)
+            try:
+                size = path.stat().st_size
+            except OSError:
+                size = -1
+            cached = self._cover_cache.get(key)
+            if cached is not None and cached[0] == size:
+                self._show_preview(cached[1])
+                return
+            self._show_preview(None)  # разбор в фоне, результат — через очередь
+
+            def work():
+                data = book_cover(path)
+                self.q.put(("cover", req, key, size, data))
+
+            threading.Thread(target=work, daemon=True).start()
+
+        def _show_preview(self, data):
+            """data=None — загрузка; {} — нет обложки; иначе dict из book_cover."""
+            self._cover_photo = None
+            if data is None:
+                self.cover_label.configure(image="", text=t("gui.cover_loading"),
+                                           width=26, height=12)
+                self.cover_info.configure(text="")
+                return
+            info = "\n".join(p for p in (data.get("title", ""),
+                                         data.get("author", "")) if p)
+            photo = None
+            if data.get("cover"):
+                raw = data["cover"]
+                ext = (data.get("cover_ext") or ".jpg").lower()
+                try:
+                    if tools.get("pillow"):
+                        from PIL import Image as pil_image, ImageTk
+                        img = pil_image.open(io.BytesIO(raw))
+                        img.thumbnail(PREVIEW_BOX)
+                        photo = ImageTk.PhotoImage(img)
+                    elif ext in (".png", ".gif"):
+                        photo = tk.PhotoImage(
+                            data=base64.b64encode(raw).decode("ascii"))
+                except Exception:
+                    photo = None
+            if photo is not None:
+                self._cover_photo = photo
+                self.cover_label.configure(image=photo, text="",
+                                           width=PREVIEW_BOX[0] + 10,
+                                           height=PREVIEW_BOX[1] + 10)
+            else:
+                self.cover_label.configure(image="", text=t("gui.cover_none"),
+                                           width=26, height=12)
+            self.cover_info.configure(text=info)
 
         # ---- batch
         def start_batch(self):
@@ -2513,6 +2796,14 @@ def run_gui():
                                     m["tag"] = tag
                     elif kind == "progress":
                         self.progress.configure(maximum=max(1, msg[2]), value=msg[1])
+                    elif kind == "cover":
+                        _, req, key, size, data = msg
+                        if data and data.get("cover"):
+                            self._cover_cache[key] = (size, data)
+                            while len(self._cover_cache) > 24:
+                                self._cover_cache.pop(next(iter(self._cover_cache)))
+                        if req == self._cover_req:
+                            self._show_preview(data or {})
                     elif kind == "waiting":
                         self.device_lbl.configure(
                             text=t("status.waiting", n=msg[1]),

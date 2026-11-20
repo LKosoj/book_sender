@@ -201,6 +201,10 @@ def make_fixtures(d: Path, tools):
     with zipfile.ZipFile(d / "book1.fb2.zip", "w") as z:
         z.writestr("book1.fb2", make_fb2("Проверка пера", "t1"))
 
+    # дубликат по содержимому: та же книга под другим именем в подпапке
+    (d / "sub").mkdir(exist_ok=True)
+    (d / "sub" / "same_book.fb2").write_bytes((d / "book1.fb2").read_bytes())
+
     (d / "cp1251.fb2").write_bytes(make_fb2("Кодировка.win", "t2", "cp1251"))
 
     # .fbz — zip с fb2 под другим именем (Flibusta)
@@ -234,6 +238,29 @@ def make_fixtures(d: Path, tools):
         input="# Глава\n\nТекст.\n".encode(), check=True, capture_output=True,
     )
 
+    # EPUB с обложкой (EPUB3 properties="cover-image") — для превью
+    with zipfile.ZipFile(d / "cover.epub", "w") as z:
+        z.writestr("mimetype", "application/epub+zip")
+        z.writestr("META-INF/container.xml",
+                   '<?xml version="1.0"?><container version="1.0" '
+                   'xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+                   '<rootfiles><rootfile full-path="OEBPS/content.opf" '
+                   'media-type="application/oebps-package+xml"/></rootfiles>'
+                   '</container>')
+        z.writestr("OEBPS/content.opf",
+                   '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" '
+                   'version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+                   '<dc:title>Книга с обложкой</dc:title>'
+                   '<dc:creator>Иван Тестов</dc:creator></metadata>'
+                   '<manifest><item id="ch1" href="ch1.xhtml" '
+                   'media-type="application/xhtml+xml"/>'
+                   '<item id="cimg" href="cover.png" media-type="image/png" '
+                   'properties="cover-image"/></manifest>'
+                   '<spine><itemref idref="ch1"/></spine></package>')
+        z.writestr("OEBPS/ch1.xhtml",
+                   '<html><head><title>t</title></head><body><p>Текст</p></body></html>')
+        z.writestr("OEBPS/cover.png", PNG)
+
     if not tools.get("calibre"):
         pass  # PDF теперь обрабатывается без Calibre: текст->EPUB, скан->XTC
     (d / "unsupported.cbr").write_bytes(b"fake comic book archive")
@@ -260,6 +287,8 @@ def make_fixtures(d: Path, tools):
         doc.set_metadata({"title": "Тестовый PDF", "author": "Иван Тестов"})
         doc.save(d / "doc.pdf")
         doc.close()
+        # дубликат PDF по содержимому
+        (d / "doc_copy.pdf").write_bytes((d / "doc.pdf").read_bytes())
         # скан: страница-картинка БЕЗ текстового слоя (настоящий скан)
         scan = pymupdf.open()
         simg = PILImage.new("L", (1240, 1754), 255)  # «скан A4» 150 dpi
@@ -508,6 +537,7 @@ def main():
             f"{AF}/Тестов Иван - Вторая книга.epub",
             "note.epub", "page.epub", "ready.epub", "fonted.epub",
             "brokenfont.epub", "native.xtc",  # без автора -> корень
+            f"{AF}/cover.epub",  # автор из OPF -> папка автора
         }
         try:
             import PIL  # noqa: F401
@@ -603,6 +633,40 @@ def main():
             assert (books / "scanbook.xtc").read_bytes()[:4] == b"XTC\x00", \
                 "DjVu должен уйти в XTC страницами"
             print("DjVu -> XTC страницами — ОК")
+
+        # 2e) превью обложек: fb2, fb2.zip, epub (cover-image), pdf (1-я страница)
+        c1 = bs.book_cover(fixtures / "book1.fb2")
+        assert c1.get("cover") == PNG and c1.get("title") == "Проверка пера", c1
+        c2 = bs.book_cover(fixtures / "book1.fb2.zip")
+        assert c2.get("cover") == PNG, c2
+        c3 = bs.book_cover(fixtures / "cover.epub")
+        assert c3.get("cover") == PNG and c3.get("author") == "Иван Тестов", c3
+        assert not bs.book_cover(fixtures / "ready.epub").get("cover")
+        if tools.get("pymupdf"):
+            c4 = bs.book_cover(fixtures / "doc.pdf")
+            assert c4.get("cover", b"")[:4] == b"\x89PNG", c4
+            assert c4.get("title") == "Тестовый PDF", c4
+        print("превью обложек: fb2 / fb2.zip / epub / pdf — ОК")
+
+        # 2f) дубликаты по содержимому: копии пропускаются до конвертации
+        expected_dups = {"same_book.fb2": "book1.fb2"}
+        if tools.get("pymupdf"):
+            expected_dups["doc_copy.pdf"] = "doc.pdf"
+        dups = bs.find_duplicates(files)
+        got = {Path(k).name: Path(v).name for k, v in dups.items()}
+        assert got == expected_dups, got
+        dup_files = [fixtures / "book1.fb2", fixtures / "sub" / "same_book.fb2"]
+        if tools.get("pymupdf"):
+            dup_files += [fixtures / "doc.pdf", fixtures / "doc_copy.pdf"]
+        logs_d = []
+        sd, kd, ed = bs.run_batch(dup_files, host, "/Dup", False, tools,
+                                  logs_d.append, formats=["epub"] * len(dup_files))
+        n_orig = len(dup_files) // 2
+        assert ed == 0 and sd == n_orig and kd == n_orig, (sd, kd, ed, logs_d)
+        assert any("same_book.fb2" in l and "book1.fb2" in l for l in logs_d), logs_d
+        uploaded = [p.name for p in (storage / "Dup").rglob("*") if p.is_file()]
+        assert len(uploaded) == n_orig, uploaded
+        print(f"дубликаты: {kd} копии пропущены до конвертации — ОК")
 
         # 3) повторный прогон — всё пропущено
         logs2 = []

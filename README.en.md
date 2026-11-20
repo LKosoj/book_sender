@@ -63,8 +63,16 @@ You can also send only part of the list: select the rows you want
 (Cmd/Shift+click) and press "Convert & Send" — only those will be processed.
 With nothing selected, everything is sent.
 
+Clicking a row shows the **book cover** in the panel to the right of the list
+(FB2, FB2 inside zip/fbz, EPUB; for PDF — the first page), together with the
+title and author from the metadata.
+
 Re-running is safe: already-uploaded books are skipped (including those sorted
 into author folders). Overwrite mode replaces old copies.
+**Duplicates are skipped automatically**: files with identical content (even
+under different names or in different subfolders) are neither converted nor
+sent — the first copy wins. Different formats of the same book (e.g. fb2 and
+epub) are not considered duplicates.
 
 ### CLI (for automation)
 
@@ -104,6 +112,8 @@ forever; interrupt with Ctrl+C.
 - **Skipping what is already uploaded**: `/Books` is checked together with all
   subfolders, so a re-run never duplicates anything. Overwrite mode replaces
   old copies (even ones in a different folder).
+- **Skipping content duplicates** (always on, no setting): identical files
+  under different names are neither converted nor sent again.
 - **EPUB optimization** (enabled by default; `--no-optimize` to disable):
   - protective CSS so the book does not overflow the 480×800 screen;
   - removal of embedded fonts (the reader does not use them — saves up to 2 MB);
