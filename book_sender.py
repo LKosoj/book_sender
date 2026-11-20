@@ -435,9 +435,10 @@ def zip_fb2_bytes(path: Path) -> bytes | None:
     return None
 
 
-def epub_preview(path: Path) -> dict:
+def epub_preview(path) -> dict:
     """Обложка + название/автор EPUB одним чтением архива (для превью):
-    {"cover": bytes, "cover_ext": str, "title": str, "author": str}."""
+    {"cover": bytes, "cover_ext": str, "title": str, "author": str}.
+    path — путь или файловый объект (BytesIO EPUB, скачанного с читалки)."""
     out: dict = {}
     try:
         with zipfile.ZipFile(path) as z:
@@ -1493,6 +1494,33 @@ class Device:
                     found.setdefault(e["name"].lower(), full)
         return found
 
+    def list_tree(self, path: str, stop=None) -> list:
+        """Все файлы под path: [{"path": полный путь, "size": байты}],
+        отсортировано по пути. Скрытые папки пропускаются, глубина ограничена."""
+        out = []
+        stack = [(path, 0)]
+        while stack:
+            d, depth = stack.pop()
+            if stop is not None and stop.is_set():
+                raise Cancelled()
+            for e in self.list_dir(d) or []:
+                full = d.rstrip("/") + "/" + e["name"]
+                if e.get("isDirectory"):
+                    if depth < 8 and not e["name"].startswith("."):
+                        stack.append((full, depth + 1))
+                else:
+                    out.append({"path": full, "size": e.get("size", 0)})
+        return sorted(out, key=lambda x: x["path"].casefold())
+
+    def download(self, path: str, timeout=120) -> bytes:
+        """Скачать файл с SD (GET /download) — например, ради обложки."""
+        url = "/download?path=" + parse.quote(path, safe="")
+        try:
+            with self._req("GET", url, timeout=timeout) as resp:
+                return resp.read()
+        except error.HTTPError as e:
+            raise DeviceError(f"download {path}: HTTP {e.code}") from e
+
     def delete(self, path: str):
         body = parse.urlencode({"path": path}).encode()
         try:
@@ -1503,6 +1531,18 @@ class Device:
             ).close()
         except error.HTTPError as e:
             raise DeviceError(f"delete {path}: HTTP {e.code}") from e
+
+    def delete_many(self, paths: list):
+        """Пакетное удаление (POST /delete, paths=JSON-массив)."""
+        body = parse.urlencode({"paths": json.dumps(paths)}).encode()
+        try:
+            self._req(
+                "POST", "/delete", data=body,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=60,
+            ).close()
+        except error.HTTPError as e:
+            raise DeviceError(f"delete {len(paths)} path(s): HTTP {e.code}") from e
 
     def upload(self, file: Path, dest: str, overwrite: bool, timeout=300):
         boundary = "----BookSender" + uuid.uuid4().hex
@@ -1696,6 +1736,66 @@ def find_duplicates(files, stop=None) -> dict:
             else:
                 seen[digest] = p
     return dups
+
+
+def _fb2_device_name(meta: dict, fallback_stem: str) -> str:
+    """Имя EPUB на читалке для FB2 — точно как в convert_one."""
+    title = meta.get("title") or fallback_stem
+    if meta.get("author"):
+        title = f"{meta['author']} - {title}"
+    return sanitize_filename(title) + ".epub"
+
+
+def expected_device_names(path: Path) -> list:
+    """Имена, под которыми книга уйдёт на читалку (для синхронизации
+    браузера устройства с локальным каталогом). 7z/rar не разбираем."""
+    ext = path.suffix.lower()
+    try:
+        if ext in NATIVE_EXTS:
+            return [path.name]
+        if ext == ".fb2":
+            return [_fb2_device_name(fb2_meta(path), path.stem)]
+        if ext in PANDOC_FORMATS:
+            return [sanitize_filename(path.stem) + ".epub"]
+        if ext == ".pdf":
+            meta = pdf_meta(path)
+            stem = sanitize_filename(
+                ((meta.get("author") + " - ") if meta.get("author") else "")
+                + (meta.get("title") or path.stem))
+            return [stem + e for e in (".epub", ".xtc", ".xtch")]
+        if ext == ".djvu":
+            stem = sanitize_filename(path.stem)
+            return [stem + ".xtc", stem + ".xtch"]
+        if ext in (".zip", ".fbz"):
+            names = []
+            with zipfile.ZipFile(path) as z:
+                for info in z.infolist():
+                    if info.is_dir():
+                        continue
+                    inner = info.filename.replace("\\", "/").rsplit("/", 1)[-1]
+                    iext = Path(inner).suffix.lower()
+                    if iext == ".fb2" and not inner.startswith("._"):
+                        names.append(_fb2_device_name(
+                            fb2_meta_bytes(z.read(info)), Path(inner).stem))
+                    elif iext in NATIVE_EXTS:
+                        names.append(inner)
+                    elif iext in PANDOC_FORMATS:
+                        names.append(
+                            sanitize_filename(Path(inner).stem) + ".epub")
+            return names
+    except Exception:
+        return []
+    return []
+
+
+def catalog_index(files) -> dict:
+    """{имя_на_читалке.lower: локальный путь} — какие книги каталога
+    соответствуют файлам на устройстве (имена как при отправке)."""
+    index = {}
+    for p in files:
+        for name in expected_device_names(p):
+            index.setdefault(name.lower(), p)
+    return index
 
 
 def scan_folder(folder: Path, recursive=True) -> list:
@@ -2192,6 +2292,25 @@ def run_gui():
 
     tools = detect_tools()
 
+    def cover_photo(data):
+        """PhotoImage обложки из dict book_cover/epub_preview (None, если
+        показать нельзя: JPEG без Pillow, битые данные). Создаётся в GUI-потоке."""
+        if not data.get("cover"):
+            return None
+        raw = data["cover"]
+        ext = (data.get("cover_ext") or ".jpg").lower()
+        try:
+            if tools.get("pillow"):
+                from PIL import Image as pil_image, ImageTk
+                img = pil_image.open(io.BytesIO(raw))
+                img.thumbnail(PREVIEW_BOX)
+                return ImageTk.PhotoImage(img)
+            if ext in (".png", ".gif"):
+                return tk.PhotoImage(data=base64.b64encode(raw).decode("ascii"))
+        except Exception:
+            return None
+        return None
+
     class App:
         def __init__(self, root):
             self.root = root
@@ -2208,6 +2327,8 @@ def run_gui():
             self._cover_req = 0
             self._cover_cache = {}  # str(path) -> (размер, dict из book_cover)
             self._cover_photo = None
+            self.browser = None
+            self.device_online = False
             self.settings = self.load_settings()
             set_language(self.settings.get("language", "auto"))
             root.title(t("app.title", app=APP_NAME))
@@ -2233,6 +2354,12 @@ def run_gui():
             self.update_font_visibility()
             if self.folder_var.get() and Path(self.folder_var.get()).expanduser().is_dir():
                 self.scan_files()
+            host0 = self.host_var.get().strip()
+            if host0:
+                # читалка могла быть в сети ещё до запуска — покажем кнопку браузера
+                def probe():
+                    self.q.put(("online", probe_device(host0) is not None))
+                threading.Thread(target=probe, daemon=True).start()
             root.after(5000, self.poll_folder)
 
         # ---- ui
@@ -2322,7 +2449,13 @@ def run_gui():
             self.stop_btn = ttk.Button(btns, text=t("gui.stop"), command=self.stop,
                                        state="disabled")
             self.stop_btn.pack(side="left")
-            ttk.Label(btns, text=t("gui.format")).pack(side="left", padx=(12, 2))
+            self.fmt_label = ttk.Label(btns, text=t("gui.format"))
+            self.fmt_label.pack(side="left", padx=(12, 2))
+            # кнопка браузера читалки видна только когда устройство в сети
+            self.browser_btn = ttk.Button(btns, text=t("gui.open_browser"),
+                                          command=self.open_browser)
+            if self.device_online:
+                self.browser_btn.pack(side="left", padx=6, before=self.fmt_label)
             labels = format_labels()
             self.bulk_format_var = tk.StringVar(value=labels["epub"])
             ttk.Combobox(btns, textvariable=self.bulk_format_var, state="readonly",
@@ -2435,6 +2568,8 @@ def run_gui():
 
         def rebuild_ui(self):
             """Пересборка интерфейса при смене языка с сохранением списка файлов."""
+            if self.browser is not None:
+                self.browser.close()  # окно браузера не переживает смену языка
             for child in self.root.winfo_children():
                 child.destroy()
             self.build_ui()
@@ -2462,6 +2597,23 @@ def run_gui():
                 b.configure(state=state)
             self.stop_btn.configure(state="normal" if busy else "disabled")
 
+        def set_device_online(self, online):
+            """Кнопка «Браузер читалки» показывается только при устройстве в сети."""
+            self.device_online = online
+            if online:
+                self.browser_btn.pack(side="left", padx=6, before=self.fmt_label)
+            else:
+                self.browser_btn.pack_forget()
+
+        def open_browser(self):
+            if not self.device_online:
+                return
+            if self.browser is not None and not self.browser.closed:
+                self.browser.win.lift()
+                self.browser.refresh()
+                return
+            self.browser = DeviceBrowser(self)
+
         # ---- discovery
         def find_device(self):
             self.set_busy(True)
@@ -2477,6 +2629,7 @@ def run_gui():
                             self.log(t("log.also_found", ip=ip2, version=st2.get('version')))
                     else:
                         self.log(t("log.not_found_gui"))
+                        self.q.put(("online", False))
                 except Cancelled:
                     self.log(t("log.search_stopped"))
                 except Exception as e:
@@ -2524,6 +2677,8 @@ def run_gui():
             self.progress.configure(maximum=max(1, len(self.files)), value=0)
             self.log(t("log.found_files", count=len(self.files), folder=folder))
             self.update_font_visibility()
+            if self.browser is not None and not self.browser.closed:
+                self.browser.rematch()
 
         def poll_folder(self):
             try:
@@ -2590,6 +2745,8 @@ def run_gui():
                 self.iids.append(iid)
             self.progress.configure(maximum=max(1, len(self.files)), value=0)
             self.update_font_visibility()
+            if self.browser is not None and not self.browser.closed:
+                self.browser.rematch()
 
         def update_font_visibility(self):
             """Размер шрифта показываем только если выбран XTC/XTCH."""
@@ -2672,21 +2829,7 @@ def run_gui():
                 return
             info = "\n".join(p for p in (data.get("title", ""),
                                          data.get("author", "")) if p)
-            photo = None
-            if data.get("cover"):
-                raw = data["cover"]
-                ext = (data.get("cover_ext") or ".jpg").lower()
-                try:
-                    if tools.get("pillow"):
-                        from PIL import Image as pil_image, ImageTk
-                        img = pil_image.open(io.BytesIO(raw))
-                        img.thumbnail(PREVIEW_BOX)
-                        photo = ImageTk.PhotoImage(img)
-                    elif ext in (".png", ".gif"):
-                        photo = tk.PhotoImage(
-                            data=base64.b64encode(raw).decode("ascii"))
-                except Exception:
-                    photo = None
+            photo = cover_photo(data)
             if photo is not None:
                 self._cover_photo = photo
                 self.cover_label.configure(image=photo, text="",
@@ -2811,6 +2954,7 @@ def run_gui():
                     elif kind == "found":
                         _, ip, st = msg
                         self.host_var.set(ip)
+                        self.set_device_online(True)
                         self.device_lbl.configure(
                             text=f"{st.get('device', '?')} v{st.get('version', '?')}",
                             foreground="#0a7d32")
@@ -2821,6 +2965,11 @@ def run_gui():
                         self.host_var.set(msg[1])
                     elif kind == "busy":
                         self.set_busy(msg[1])
+                        if not msg[1] and self.browser is not None \
+                                and not self.browser.closed:
+                            self.browser.refresh()  # синхронизация после батча
+                    elif kind == "online":
+                        self.set_device_online(msg[1])
                     elif kind == "save":
                         self.save_settings()
             except queue.Empty:
@@ -2830,7 +2979,294 @@ def run_gui():
         def on_close(self):
             self.save_settings()
             self.stop_event.set()
+            if self.browser is not None:
+                self.browser.close()
             self.root.destroy()
+
+    class DeviceBrowser:
+        """Окно-браузер содержимого читалки: файлы устройства с отметкой
+        «есть в локальном каталоге», обложки (из каталога или скачанные
+        с устройства) и удаление выбранных файлов с читалки."""
+
+        COVER_DOWNLOAD_MAX = 30 * 1024 * 1024  # больше — не качаем ради обложки
+
+        def __init__(self, app):
+            self.app = app
+            self.host = app.host_var.get().strip()
+            self.dest = app.dest_var.get().strip() or "/Books"
+            if not self.dest.startswith("/"):
+                self.dest = "/" + self.dest
+            self.q = queue.Queue()
+            self.closed = False
+            self.busy = False
+            self.entries = []       # [{"path": ..., "size": ...}]
+            self.iids = []
+            self.index = catalog_index(app.files)
+            self._cover_req = 0
+            self._cover_cache = {}  # device path -> (ключ кэша, dict обложки)
+            self._cover_photo = None
+            self.win = tk.Toplevel(app.root)
+            self.win.title(t("browser.title", host=self.host))
+            self.win.geometry("940x600")
+            self.win.minsize(700, 420)
+            self.win.transient(app.root)
+            self.win.protocol("WM_DELETE_WINDOW", self.close)
+            self._build_ui()
+            self.refresh()
+            self._poll()
+
+        def _build_ui(self):
+            pad = {"padx": 6, "pady": 3}
+            top = ttk.Frame(self.win)
+            top.pack(fill="x", **pad)
+            ttk.Label(top, text=t("browser.folder", dest=self.dest)).pack(side="left")
+            self.refresh_btn = ttk.Button(top, text=t("browser.refresh"),
+                                          command=self.refresh)
+            self.refresh_btn.pack(side="right")
+            self.delete_btn = ttk.Button(top, text=t("browser.delete"),
+                                         command=self.delete_selected)
+            self.delete_btn.pack(side="right", padx=6)
+            ttk.Button(top, text=t("browser.close"),
+                       command=self.close).pack(side="right")
+
+            body = ttk.Frame(self.win)
+            body.pack(fill="both", expand=True, padx=6)
+            cols = ("file", "size", "sync")
+            self.tree = ttk.Treeview(body, columns=cols, show="headings",
+                                     selectmode="extended")
+            self.tree.heading("file", text=t("browser.col_file"))
+            self.tree.heading("size", text=t("browser.col_size"))
+            self.tree.heading("sync", text=t("browser.col_sync"))
+            self.tree.column("file", width=430, anchor="w")
+            self.tree.column("size", width=80, anchor="e")
+            self.tree.column("sync", width=90, anchor="center")
+            self.tree.tag_configure("local", foreground="#0a7d32")
+            vsb = ttk.Scrollbar(body, orient="vertical", command=self.tree.yview)
+            self.tree.configure(yscrollcommand=vsb.set)
+            preview = ttk.Frame(body)
+            preview.pack(side="right", fill="y", padx=(6, 0))
+            ttk.Label(preview, text=t("gui.preview"),
+                      font=("", 11, "bold")).pack(anchor="center")
+            self.cover_label = tk.Label(preview, text=t("gui.cover_none"),
+                                        foreground="#888", anchor="center",
+                                        width=26, height=12)
+            self.cover_label.pack(padx=2, pady=2)
+            self.cover_info = tk.Label(preview, text="", foreground="#555",
+                                       wraplength=190, justify="center")
+            self.cover_info.pack()
+            self.cover_src = tk.Label(preview, text="", foreground="#888",
+                                      wraplength=190, justify="center")
+            self.cover_src.pack()
+            vsb.pack(side="right", fill="y")
+            self.tree.pack(side="left", fill="both", expand=True)
+            self.tree.bind("<<TreeviewSelect>>", self.on_select)
+            self.status = tk.StringVar(value="")
+            ttk.Label(self.win, textvariable=self.status, relief="sunken",
+                      anchor="w", padding=4).pack(fill="x", side="bottom")
+
+        # ---- список файлов устройства
+        def refresh(self):
+            if self.busy or self.closed:
+                return
+            self.busy = True
+            self.refresh_btn.configure(state="disabled")
+            self.delete_btn.configure(state="disabled")
+            self.status.set(t("browser.loading"))
+            self.index = catalog_index(self.app.files)
+            host = self.host
+
+            def work():
+                try:
+                    entries = Device(host).list_tree(self.dest)
+                    self.q.put(("list", entries, None))
+                except Exception as e:
+                    self.q.put(("list", None, e))
+
+            threading.Thread(target=work, daemon=True).start()
+
+        def _fill_list(self, entries):
+            self.entries = entries
+            self.tree.delete(*self.tree.get_children())
+            self.iids = []
+            prefix = len(self.dest.rstrip("/")) + 1
+            for e in entries:
+                rel = e["path"][prefix:]
+                name = e["path"].rsplit("/", 1)[-1].lower()
+                local = self.index.get(name) is not None
+                size = e["size"]
+                size_txt = (f"{size / 1048576:.1f} MB" if size >= 1048576
+                            else f"{size / 1024:.0f} KB")
+                iid = self.tree.insert("", "end", values=(
+                    rel, size_txt,
+                    t("browser.sync_yes") if local else t("browser.sync_no")),
+                    tags=("local",) if local else ())
+                self.iids.append(iid)
+            self.status.set(t("browser.empty") if not entries
+                            else t("browser.count", n=len(entries)))
+            self._show_cover({}, "")
+
+        def rematch(self):
+            """Локальный каталог изменился — обновить отметки без сети."""
+            if self.closed:
+                return
+            self.index = catalog_index(self.app.files)
+            for iid, e in zip(self.iids, self.entries):
+                name = e["path"].rsplit("/", 1)[-1].lower()
+                local = self.index.get(name) is not None
+                self.tree.set(iid, "sync",
+                              t("browser.sync_yes") if local else t("browser.sync_no"))
+                self.tree.item(iid, tags=("local",) if local else ())
+
+        # ---- обложка выбранного файла
+        def on_select(self, _event=None):
+            sel = self.tree.selection()
+            if not sel or sel[0] not in self.iids:
+                self._show_cover({}, "")
+                return
+            e = self.entries[self.iids.index(sel[0])]
+            name = e["path"].rsplit("/", 1)[-1].lower()
+            local = self.index.get(name)
+            self._cover_req += 1
+            req = self._cover_req
+            key = e["path"]
+            if local is not None:
+                # книга есть в каталоге — обложку берём локально, без сети
+                try:
+                    size = local.stat().st_size
+                except OSError:
+                    size = -1
+                cache_key = ("local", size)
+                cached = self._cover_cache.get(key)
+                if cached is not None and cached[0] == cache_key:
+                    self._show_cover(cached[1], t("browser.cover_local"))
+                    return
+                self._show_cover(None, "")
+
+                def work():
+                    data = book_cover(local)
+                    self.q.put(("cover", req, key, cache_key, data, "local"))
+
+                threading.Thread(target=work, daemon=True).start()
+                return
+            if not name.endswith(".epub") or e["size"] > self.COVER_DOWNLOAD_MAX:
+                self._show_cover({}, "")
+                return
+            cache_key = ("device", e["size"])
+            cached = self._cover_cache.get(key)
+            if cached is not None and cached[0] == cache_key:
+                self._show_cover(cached[1], t("browser.cover_device"))
+                return
+            self._show_cover(None, t("browser.downloading"))
+            host = self.host
+
+            def work():
+                try:
+                    raw = Device(host).download(e["path"])
+                    data = epub_preview(io.BytesIO(raw))
+                except Exception:
+                    data = {}
+                self.q.put(("cover", req, key, cache_key, data, "device"))
+
+            threading.Thread(target=work, daemon=True).start()
+
+        def _show_cover(self, data, src_text):
+            self._cover_photo = None
+            if data is None:
+                self.cover_label.configure(image="", text=t("gui.cover_loading"),
+                                           width=26, height=12)
+                self.cover_info.configure(text="")
+                self.cover_src.configure(text=src_text)
+                return
+            photo = cover_photo(data)
+            info = "\n".join(p for p in (data.get("title", ""),
+                                         data.get("author", "")) if p)
+            if photo is not None:
+                self._cover_photo = photo
+                self.cover_label.configure(image=photo, text="",
+                                           width=PREVIEW_BOX[0] + 10,
+                                           height=PREVIEW_BOX[1] + 10)
+            else:
+                self.cover_label.configure(image="", text=t("gui.cover_none"),
+                                           width=26, height=12)
+            self.cover_info.configure(text=info)
+            self.cover_src.configure(text=src_text)
+
+        # ---- удаление с читалки
+        def delete_selected(self):
+            if self.busy or self.closed:
+                return
+            sel = [i for i in self.tree.selection() if i in self.iids]
+            if not sel:
+                messagebox.showinfo(APP_NAME, t("browser.no_selection"),
+                                    parent=self.win)
+                return
+            paths = [self.entries[self.iids.index(i)]["path"] for i in sel]
+            if not messagebox.askyesno(
+                    APP_NAME, t("browser.confirm_delete", n=len(paths)),
+                    parent=self.win):
+                return
+            self.busy = True
+            self.refresh_btn.configure(state="disabled")
+            self.delete_btn.configure(state="disabled")
+            self.status.set(t("browser.deleting", n=len(paths)))
+            host = self.host
+
+            def work():
+                try:
+                    Device(host).delete_many(paths)
+                    self.q.put(("deleted", paths, None))
+                except Exception as e:
+                    self.q.put(("deleted", None, e))
+
+            threading.Thread(target=work, daemon=True).start()
+
+        # ---- очередь GUI
+        def _poll(self):
+            if self.closed:
+                return
+            try:
+                while True:
+                    msg = self.q.get_nowait()
+                    kind = msg[0]
+                    if kind == "list":
+                        _, entries, err = msg
+                        self.busy = False
+                        self.refresh_btn.configure(state="normal")
+                        self.delete_btn.configure(state="normal")
+                        if err is not None:
+                            self.status.set(t("browser.list_error", error=err))
+                            if isinstance(err, (error.URLError, ConnectionError)):
+                                self.app.set_device_online(False)
+                        else:
+                            self._fill_list(entries)
+                    elif kind == "cover":
+                        _, req, key, cache_key, data, src = msg
+                        if data and data.get("cover"):
+                            self._cover_cache[key] = (cache_key, data)
+                            while len(self._cover_cache) > 24:
+                                self._cover_cache.pop(next(iter(self._cover_cache)))
+                        if req == self._cover_req:
+                            self._show_cover(data or {}, t("browser.cover_" + src))
+                    elif kind == "deleted":
+                        _, paths, err = msg
+                        self.busy = False
+                        self.refresh_btn.configure(state="normal")
+                        self.delete_btn.configure(state="normal")
+                        if err is not None:
+                            self.status.set(t("browser.delete_error", error=err))
+                            self.app.log(t("browser.delete_error", error=err))
+                        else:
+                            self.app.log(t("browser.deleted", n=len(paths)))
+                            self.refresh()
+            except queue.Empty:
+                pass
+            self.win.after(100, self._poll)
+
+        def close(self):
+            self.closed = True
+            if self.app.browser is self:
+                self.app.browser = None
+            self.win.destroy()
 
     root = tk.Tk()
     try:

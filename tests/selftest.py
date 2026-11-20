@@ -124,6 +124,12 @@ class MockHandler(BaseHTTPRequestHandler):
                     "isEpub": p.suffix.lower() == ".epub",
                 })
             self._json(200, items)
+        elif u.path == "/download":
+            p = self._dir(q.get("path", [""])[0])
+            if not p.is_file():
+                self._send(404, b"not found")
+                return
+            self._send(200, p.read_bytes(), "application/octet-stream")
         elif u.path == "/":
             self._send(200, b"<html>CrossPoint mock</html>", "text/html")
         else:
@@ -169,15 +175,18 @@ class MockHandler(BaseHTTPRequestHandler):
                 self._send(400, b"no file part")
         elif u.path == "/delete":
             form = parse.parse_qs(body.decode())
-            p = self._dir(form["path"][0])
-            if p.is_file():
-                p.unlink()
-                self._send(200, b"All items deleted successfully")
-            elif p.is_dir() and not any(p.iterdir()):
-                p.rmdir()
-                self._send(200, b"All items deleted successfully")
-            else:
-                self._send(500, b"cannot delete")
+            paths = (json.loads(form["paths"][0]) if "paths" in form
+                     else [form["path"][0]])
+            for path in paths:
+                p = self._dir(path)
+                if p.is_file():
+                    p.unlink()
+                elif p.is_dir() and not any(p.iterdir()):
+                    p.rmdir()
+                else:
+                    self._send(500, b"cannot delete")
+                    return
+            self._send(200, b"All items deleted successfully")
         else:
             self._send(404, b"not found")
 
@@ -667,6 +676,35 @@ def main():
         uploaded = [p.name for p in (storage / "Dup").rglob("*") if p.is_file()]
         assert len(uploaded) == n_orig, uploaded
         print(f"дубликаты: {kd} копии пропущены до конвертации — ОК")
+
+        # 2g) синхронизация каталога с устройством: имена как при отправке
+        idx = bs.catalog_index(files)
+        assert idx.get("тестов иван - проверка пера.epub") == fixtures / "book1.fb2", idx
+        assert idx.get("тестов иван - кодировка.win.epub") == fixtures / "cp1251.fb2"
+        assert idx.get("note.epub") == fixtures / "note.txt"
+        assert idx.get("ready.epub") == fixtures / "ready.epub"
+        assert idx.get("тестов иван - первая книга.epub") == fixtures / "russian.zip"
+        if tools.get("pymupdf"):
+            assert idx.get("иван тестов - тестовый pdf.epub") == fixtures / "doc.pdf"
+        print("синхронизация каталога: expected_device_names — ОК")
+
+        # 2h) браузер устройства: list_tree / download / delete_many
+        logs_br = []
+        bs.run_batch([fixtures / "note.txt", fixtures / "page.html"],
+                     host, "/Browser", False, tools, logs_br.append)
+        dev = bs.Device(host)
+        tree = dev.list_tree("/Browser")
+        assert len(tree) == 2 and all("path" in e and "size" in e for e in tree), tree
+        assert {e["path"] for e in tree} == {"/Browser/note.epub", "/Browser/page.epub"}
+        target = f"/Books/{AF}/Тестов Иван - Проверка пера.epub"
+        raw = dev.download(target)
+        assert raw == (books / AF / "Тестов Иван - Проверка пера.epub").read_bytes()
+        pv = bs.epub_preview(io.BytesIO(raw))  # обложка EPUB, скачанного с читалки
+        assert pv.get("cover"), "обложка из скачанного EPUB должна находиться"
+        dev.delete_many(["/Browser/note.epub", "/Browser/page.epub"])
+        assert not list((storage / "Browser").rglob("*.epub")), "файлы должны удалиться"
+        assert (storage / "Books" / "ready.epub").is_file(), "чужие файлы целы"
+        print("браузер устройства: list_tree / download / delete_many — ОК")
 
         # 3) повторный прогон — всё пропущено
         logs2 = []

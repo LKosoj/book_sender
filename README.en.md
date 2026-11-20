@@ -74,6 +74,23 @@ under different names or in different subfolders) are neither converted nor
 sent — the first copy wins. Different formats of the same book (e.g. fb2 and
 epub) are not considered duplicates.
 
+### Reader browser
+
+Once the reader is found on the network, a **"Reader browser"** button appears
+next to the other buttons (hidden while offline). The window lists the files
+in the destination folder (`/Books` by default), including subfolders, with sizes:
+
+- **"✓ local"** — the book is in your local catalog (matched by the name it is
+  sent under). Its cover is taken from the local file — nothing is downloaded
+  from the reader.
+- Books not in the catalog: the EPUB cover is **downloaded from the reader
+  automatically** (files up to 30 MB); XTC/TXT have no cover.
+- **Deletion**: select files (Cmd/Shift+click) → "Delete from reader" →
+  confirm. Only the selected files are deleted; this cannot be undone.
+
+The list refreshes via the "Refresh" button and automatically after each send;
+the "local" marks are recomputed whenever the local catalog changes.
+
 ### CLI (for automation)
 
 ```bash
