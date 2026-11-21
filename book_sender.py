@@ -2329,6 +2329,7 @@ def run_gui():
             self._cover_photo = None
             self.browser = None
             self.device_online = False
+            self._presence_busy = False
             self.settings = self.load_settings()
             set_language(self.settings.get("language", "auto"))
             root.title(t("app.title", app=APP_NAME))
@@ -2361,6 +2362,7 @@ def run_gui():
                     self.q.put(("online", probe_device(host0) is not None))
                 threading.Thread(target=probe, daemon=True).start()
             root.after(5000, self.poll_folder)
+            root.after(5000, self.poll_device)
 
         # ---- ui
         def build_ui(self):
@@ -2687,6 +2689,33 @@ def run_gui():
             finally:
                 self.root.after(5000, self.poll_folder)
 
+        def poll_device(self):
+            """Фоновая проверка присутствия читалки в сети каждые 5 с:
+            известный адрес + дешёвый UDP-поиск (ловит смену IP).
+            Кнопка браузера появляется/исчезает сама, без «Найти»."""
+            try:
+                if not self.busy and not self._presence_busy:
+                    self._presence_busy = True
+                    host = self.host_var.get().strip()
+
+                    def work():
+                        try:
+                            st = probe_device(host) if host else None
+                            ip = host if st else None
+                            if st is None:
+                                for ip2 in udp_discover(timeout=0.8):
+                                    st = probe_device(ip2)
+                                    if st:
+                                        ip = ip2
+                                        break
+                            self.q.put(("presence", ip, st))
+                        finally:
+                            self._presence_busy = False
+
+                    threading.Thread(target=work, daemon=True).start()
+            finally:
+                self.root.after(5000, self.poll_device)
+
         def _watch_folder(self):
             """Мониторинг папки: новые и изменённые файлы наверху списка."""
             folder = Path(self.folder_var.get()).expanduser()
@@ -2970,6 +2999,25 @@ def run_gui():
                             self.browser.refresh()  # синхронизация после батча
                     elif kind == "online":
                         self.set_device_online(msg[1])
+                    elif kind == "presence":
+                        _, ip, st = msg
+                        was = self.device_online
+                        if st:
+                            if ip and ip != self.host_var.get().strip():
+                                self.host_var.set(ip)
+                            self.device_lbl.configure(
+                                text=f"{st.get('device', '?')} v{st.get('version', '?')}",
+                                foreground="#0a7d32")
+                            self.set_device_online(True)
+                            if not was:
+                                self.log(t("log.presence_online", ip=ip,
+                                           version=st.get("version", "?")))
+                        else:
+                            self.device_lbl.configure(
+                                text=t("gui.not_connected"), foreground="#666")
+                            self.set_device_online(False)
+                            if was:
+                                self.log(t("log.presence_offline"))
                     elif kind == "save":
                         self.save_settings()
             except queue.Empty:

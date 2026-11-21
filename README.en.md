@@ -77,8 +77,11 @@ epub) are not considered duplicates.
 ### Reader browser
 
 Once the reader is found on the network, a **"Reader browser"** button appears
-next to the other buttons (hidden while offline). The window lists the files
-in the destination folder (`/Books` by default), including subfolders, with sizes:
+next to the other buttons (hidden while offline). The reader's presence is
+checked automatically **every 5 seconds** (known address + CrossPoint UDP
+discovery): the button appears and disappears on its own, and IP changes are
+picked up. The window lists the files in the destination folder (`/Books`
+by default), including subfolders, with sizes:
 
 - **"✓ local"** — the book is in your local catalog (matched by the name it is
   sent under). Its cover is taken from the local file — nothing is downloaded

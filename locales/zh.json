@@ -65,6 +65,8 @@
   "log.searching": "正在网络中搜索设备…",
   "log.also_found": "同时发现：{ip} (v{version})",
   "log.not_found_gui": "✗ 未找到设备。请确认阅读器处于 File Transfer → Join Network 模式，且与电脑在同一 Wi-Fi 网络（2.4 GHz）。也可手动输入 IP。",
+  "log.presence_online": "阅读器已联网：{ip}（v{version}）",
+  "log.presence_offline": "阅读器无响应——浏览器按钮已隐藏",
   "log.search_stopped": "搜索已停止。",
   "log.search_error": "✗ 搜索出错：{error}",
   "log.found_files": "在 {folder} 中找到 {count} 个文件",

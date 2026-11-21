@@ -65,6 +65,8 @@
   "log.searching": "Поиск устройства в сети…",
   "log.also_found": "Также найдено: {ip} (v{version})",
   "log.not_found_gui": "✗ Устройство не найдено. Проверьте, что читалка в режиме File Transfer → Join Network и в той же Wi-Fi сети (2.4 ГГц). Можно ввести IP вручную.",
+  "log.presence_online": "Читалка в сети: {ip} (v{version})",
+  "log.presence_offline": "Читалка не отвечает — кнопка браузера скрыта",
   "log.search_stopped": "Поиск остановлен.",
   "log.search_error": "✗ Ошибка поиска: {error}",
   "log.found_files": "Найдено файлов: {count} в {folder}",

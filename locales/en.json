@@ -65,6 +65,8 @@
   "log.searching": "Searching for a device on the network…",
   "log.also_found": "Also found: {ip} (v{version})",
   "log.not_found_gui": "✗ Device not found. Make sure the reader is in File Transfer → Join Network mode and on the same Wi-Fi network (2.4 GHz). You can enter the IP manually.",
+  "log.presence_online": "Reader online: {ip} (v{version})",
+  "log.presence_offline": "Reader not responding — browser button hidden",
   "log.search_stopped": "Search stopped.",
   "log.search_error": "✗ Search error: {error}",
   "log.found_files": "Found {count} file(s) in {folder}",
