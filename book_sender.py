@@ -1993,12 +1993,14 @@ def ensure_reader_font(dev, log, lang=None) -> bool:
 def run_batch(files, host, dest, replace_existing, tools, log, stop=None,
               on_file=None, on_progress=None, wait_timeout=0,
               on_device=None, on_waiting=None, by_author=True, optimize=True,
-              formats=None, xtc_font_pt=None, ascii_symbols=False):
+              formats=None, xtc_font_pt=None, ascii_symbols=False,
+              excluded=None):
     """Конвертация сразу -> оптимизация -> XTC по выбору -> ожидание -> отправка.
     on_file(index, status_text, tag) — для GUI; wait_timeout=0 — ждать вечно.
     by_author: раскладывать по папкам авторов (как плагин organize-by-author).
     optimize: защитный CSS, удаление шрифтов, картинки (если есть Pillow).
-    formats: список форматов по файлам ("epub"/"xtc"/"xtch"), по умолчанию epub."""
+    formats: список форматов по файлам ("epub"/"xtc"/"xtch"), по умолчанию epub.
+    excluded: имена (lower), удалённые с читалки, — повторно не отправляются."""
     sent = skipped = errors = 0
     stage = Path(tempfile.mkdtemp(prefix="booksender_stage_"))
     try:
@@ -2213,10 +2215,18 @@ def run_batch(files, host, dest, replace_existing, tools, log, stop=None,
         done_up = 0
         made_dirs = {dest}
         for idx, items in by_idx.items():
-            file_sent = file_skipped = file_errors = 0
+            file_sent = file_skipped = file_errors = file_excluded = 0
             for epub, author in items:
                 if stop is not None and stop.is_set():
                     raise Cancelled()
+                if excluded and epub.name.lower() in excluded:
+                    # удалено с читалки вручную — повторно не отправляем
+                    log(t("log.excluded_skip", name=epub.name))
+                    file_excluded += 1
+                    done_up += 1
+                    if on_progress:
+                        on_progress(done_up, total_up)
+                    continue
                 target_dir = dest
                 if by_author and author:
                     target_dir = dest + "/" + author
@@ -2269,13 +2279,15 @@ def run_batch(files, host, dest, replace_existing, tools, log, stop=None,
                 if on_progress:
                     on_progress(done_up, total_up)
             sent += file_sent
-            skipped += file_skipped
+            skipped += file_skipped + file_excluded
             errors += file_errors
             if on_file:
                 if file_errors:
                     on_file(idx, t("status.errors_n", n=file_errors), "err")
                 elif file_sent:
                     on_file(idx, t("status.sent_n", n=file_sent), "ok")
+                elif file_excluded:
+                    on_file(idx, t("status.excluded"), "skip")
                 else:
                     on_file(idx, t("status.already"), "skip")
         log(t("log.summary", sent=sent, skipped=skipped, errors=errors))
@@ -2482,6 +2494,16 @@ def run_gui():
             self.tree.column("status", width=270, anchor="w")
             self.tree.bind("<Button-1>", self.on_tree_click)
             self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
+            # правый клик: на macOS это Button-2 / Control-клик, иначе Button-3
+            self.row_menu = tk.Menu(self.root, tearoff=0)
+            self.row_menu.add_command(label=t("gui.menu_exclude"),
+                                      command=lambda: self._set_excluded(True))
+            self.row_menu.add_command(label=t("gui.menu_unexclude"),
+                                      command=lambda: self._set_excluded(False))
+            seqs = (["<Button-2>", "<Control-Button-1>"]
+                    if sys.platform == "darwin" else ["<Button-3>"])
+            for seq in seqs:
+                self.tree.bind(seq, self.on_tree_menu)
             self.tree.tag_configure("ok", foreground="#0a7d32")
             self.tree.tag_configure("err", foreground="#c0392b")
             self.tree.tag_configure("skip", foreground="#888888")
@@ -2530,6 +2552,7 @@ def run_gui():
                     "ascii_symbols": self.ascii_var.get(),
                     "xtc_font_pt": self.xtc_font_pt_var.get(),
                     "language": self.settings.get("language", "auto"),
+                    "device_excluded": self.settings.get("device_excluded", []),
                 }, ensure_ascii=False, indent=2), "utf-8")
             except Exception:
                 pass
@@ -2591,6 +2614,7 @@ def run_gui():
                     self.iids.append(iid)
                 self.progress.configure(maximum=max(1, len(self.files)), value=0)
             self.update_font_visibility()
+            self._mark_excluded_rows()
 
         def set_busy(self, busy):
             self.busy = busy
@@ -2615,6 +2639,60 @@ def run_gui():
                 self.browser.refresh()
                 return
             self.browser = DeviceBrowser(self)
+
+        # ---- исключения: удалённое с читалки не отправляется повторно
+        def excluded_set(self):
+            return {n.lower() for n in self.settings.get("device_excluded", [])}
+
+        def _row_excluded(self, path):
+            names = {n.lower() for n in expected_device_names(path)}
+            return bool(names & self.excluded_set())
+
+        def _mark_excluded_rows(self):
+            """Статус «не отправлять» для книг, удалённых с читалки."""
+            if self.busy:
+                return
+            excl = self.excluded_set()
+            excluded_paths = ({str(p) for n, p in catalog_index(self.files).items()
+                               if n in excl} if excl else set())
+            for iid, p in zip(self.iids, self.files):
+                if str(p) in excluded_paths:
+                    self.tree.set(iid, "status", t("status.excluded"))
+                    self.tree.item(iid, tags=("skip",))
+                elif self.tree.set(iid, "status") == t("status.excluded"):
+                    self.tree.set(iid, "status", "—")
+                    self.tree.item(iid, tags=())
+
+        def on_tree_menu(self, event):
+            row = self.tree.identify_row(event.y)
+            if not row or row not in self.iids:
+                return
+            self.tree.selection_set(row)
+            self.tree.focus(row)
+            self._menu_row = row
+            excluded = self._row_excluded(self.files[self.iids.index(row)])
+            self.row_menu.entryconfigure(
+                0, state="disabled" if excluded else "normal")
+            self.row_menu.entryconfigure(
+                1, state="normal" if excluded else "disabled")
+            self.row_menu.tk_popup(event.x_root, event.y_root)
+
+        def _set_excluded(self, flag):
+            row = getattr(self, "_menu_row", None)
+            if not row or row not in self.iids:
+                return
+            path = self.files[self.iids.index(row)]
+            names = {n.lower() for n in expected_device_names(path)}
+            if not names:
+                self.log(t("log.exclude_unknown", name=path.name))
+                return
+            excl = self.excluded_set()
+            excl = excl | names if flag else excl - names
+            self.settings["device_excluded"] = sorted(excl)
+            self.save_settings()
+            self._mark_excluded_rows()
+            self.log(t("log.excluded_added" if flag else "log.excluded_removed",
+                       name=path.name))
 
         # ---- discovery
         def find_device(self):
@@ -2679,6 +2757,7 @@ def run_gui():
             self.progress.configure(maximum=max(1, len(self.files)), value=0)
             self.log(t("log.found_files", count=len(self.files), folder=folder))
             self.update_font_visibility()
+            self._mark_excluded_rows()
             if self.browser is not None and not self.browser.closed:
                 self.browser.rematch()
 
@@ -2774,6 +2853,7 @@ def run_gui():
                 self.iids.append(iid)
             self.progress.configure(maximum=max(1, len(self.files)), value=0)
             self.update_font_visibility()
+            self._mark_excluded_rows()
             if self.browser is not None and not self.browser.closed:
                 self.browser.rematch()
 
@@ -2918,7 +2998,8 @@ def run_gui():
                               on_waiting=lambda n: self.q.put(("waiting", n)),
                               by_author=by_author, optimize=optimize,
                               formats=formats, xtc_font_pt=xtc_font_pt,
-                              ascii_symbols=ascii_symbols)
+                              ascii_symbols=ascii_symbols,
+                              excluded=self.excluded_set())
                     self.save_settings_quiet()
                 except Cancelled:
                     self.log(t("log.stopped_user"))
@@ -3305,6 +3386,14 @@ def run_gui():
                             self.app.log(t("browser.delete_error", error=err))
                         else:
                             self.app.log(t("browser.deleted", n=len(paths)))
+                            # удалённое с читалки не отправляем повторно;
+                            # снять запрет: правый клик по книге -> «Снова отправлять»
+                            excl = self.app.excluded_set()
+                            excl |= {p.rsplit("/", 1)[-1].lower() for p in paths}
+                            self.app.settings["device_excluded"] = sorted(excl)
+                            self.app.save_settings_quiet()
+                            self.app.log(t("log.excluded_hint", n=len(paths)))
+                            self.app._mark_excluded_rows()
                             self.refresh()
             except queue.Empty:
                 pass
@@ -3397,13 +3486,19 @@ def main():
     host = args.host or ""
     dest = args.dest if args.dest.startswith("/") else "/" + args.dest
     try:
+        excluded = set(json.loads(SETTINGS_FILE.read_text("utf-8"))
+                       .get("device_excluded", []))
+    except Exception:
+        excluded = set()
+    try:
         _, _, errors = run_batch(files, host, dest, args.replace, tools, log,
                                  wait_timeout=args.wait_timeout,
                                  by_author=not args.flat,
                                  optimize=not args.no_optimize,
                                  formats=[args.format] * len(files),
                                  xtc_font_pt=args.xtc_font_pt,
-                                 ascii_symbols=args.ascii_symbols)
+                                 ascii_symbols=args.ascii_symbols,
+                                 excluded=excluded)
     except KeyboardInterrupt:
         log(t("cli.interrupted"))
         return 130

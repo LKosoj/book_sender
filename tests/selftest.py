@@ -706,6 +706,26 @@ def main():
         assert (storage / "Books" / "ready.epub").is_file(), "чужие файлы целы"
         print("браузер устройства: list_tree / download / delete_many — ОК")
 
+        # 2i) удалённое с читалки не отправляется повторно (список исключений)
+        logs_e = []
+        bs.run_batch([fixtures / "note.txt"], host, "/Excl", False, tools, logs_e.append)
+        assert (storage / "Excl" / "note.epub").is_file()
+        bs.Device(host).delete("/Excl/note.epub")
+        logs_e2 = []
+        se, ke, ee = bs.run_batch([fixtures / "note.txt"], host, "/Excl", False,
+                                  tools, logs_e2.append, excluded={"note.epub"})
+        assert se == 0 and ee == 0 and ke == 1, (se, ke, ee)
+        assert not (storage / "Excl" / "note.epub").exists(), \
+            "удалённая с читалки книга не должна загрузиться повторно"
+        assert any("note.epub" in l for l in logs_e2), logs_e2
+        # снятие запрета -> книга снова отправляется
+        logs_e3 = []
+        se3, _, ee3 = bs.run_batch([fixtures / "note.txt"], host, "/Excl", False,
+                                   tools, logs_e3.append, excluded=set())
+        assert se3 == 1 and ee3 == 0, (se3, ee3)
+        assert (storage / "Excl" / "note.epub").is_file()
+        print("исключения: удалённое не шлётся повторно, запрет снимается — ОК")
+
         # 3) повторный прогон — всё пропущено
         logs2 = []
         sent2, skipped2, errors2 = bs.run_batch(

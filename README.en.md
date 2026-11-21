@@ -90,6 +90,11 @@ by default), including subfolders, with sizes:
   automatically** (files up to 30 MB); XTC/TXT have no cover.
 - **Deletion**: select files (Cmd/Shift+click) → "Delete from reader" →
   confirm. Only the selected files are deleted; this cannot be undone.
+  Deleted books are remembered and **will not be sent again automatically**
+  (they are marked "won't send" in the list). To upload a book again,
+  right-click its row → **"Send again"**; the same menu can exclude any book
+  from sending ("Don't send to reader"). Exclusions persist in settings
+  between runs and also apply to the CLI.
 
 The list refreshes via the "Refresh" button and automatically after each send;
 the "local" marks are recomputed whenever the local catalog changes.
@@ -134,6 +139,9 @@ forever; interrupt with Ctrl+C.
   old copies (even ones in a different folder).
 - **Skipping content duplicates** (always on, no setting): identical files
   under different names are neither converted nor sent again.
+- **Deleted from the reader stays deleted**: books removed via the browser
+  are excluded from re-sending until you allow it again
+  (right-click → "Send again").
 - **EPUB optimization** (enabled by default; `--no-optimize` to disable):
   - protective CSS so the book does not overflow the 480×800 screen;
   - removal of embedded fonts (the reader does not use them — saves up to 2 MB);
